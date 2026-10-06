@@ -1,0 +1,21 @@
+# ROS 2 build output
+/build/
+/install/
+/log/
+
+# Python local environment
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Local environment and editor state
+.env
+.env.*
+!.env.example
+.idea/
+*.swp
+
+# OS metadata
+.DS_Store
+Thumbs.db
