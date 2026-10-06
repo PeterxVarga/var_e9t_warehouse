@@ -1,0 +1,127 @@
+<?xml version="1.0"?>
+<sdf version="1.8">
+  <model name="warehouse_robot">
+    <link name="base_link">
+      <pose>0 0 0.16 0 0 0</pose>
+      <inertial>
+        <mass>4.0</mass>
+        <!-- Uniform 0.50 x 0.32 x 0.16 m box: m/12 times squared side sums. -->
+        <inertia><ixx>0.042666667</ixx><iyy>0.091866667</iyy><izz>0.117466667</izz></inertia>
+      </inertial>
+      <collision name="body_collision">
+        <geometry><box><size>0.50 0.32 0.16</size></box></geometry>
+      </collision>
+      <visual name="body_visual">
+        <geometry><box><size>0.50 0.32 0.16</size></box></geometry>
+        <material><ambient>0.08 0.32 0.70 1</ambient><diffuse>0.08 0.32 0.70 1</diffuse></material>
+      </visual>
+      <visual name="front_marker">
+        <pose>0.24 0 0.09 0 0 0</pose>
+        <geometry><box><size>0.035 0.25 0.02</size></box></geometry>
+        <material><ambient>1 0.65 0.08 1</ambient><diffuse>1 0.65 0.08 1</diffuse></material>
+      </visual>
+    </link>
+    <link name="left_wheel">
+      <pose>0 0.19 0.08 0 0 0</pose>
+      <inertial>
+        <mass>0.20</mass>
+        <!-- Solid cylinder about y: Iyy=m*r^2/2; Ixx=Izz=m*(3*r^2+w^2)/12. -->
+        <inertia><ixx>0.000326667</ixx><iyy>0.00064</iyy><izz>0.000326667</izz></inertia>
+      </inertial>
+      <collision name="wheel_collision">
+        <pose>0 0 0 1.570796327 0 0</pose>
+        <geometry><cylinder><radius>0.08</radius><length>0.02</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="wheel_visual">
+        <pose>0 0 0 1.570796327 0 0</pose>
+        <geometry><cylinder><radius>0.08</radius><length>0.02</length></cylinder></geometry>
+        <material><ambient>0.06 0.06 0.07 1</ambient><diffuse>0.06 0.06 0.07 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="left_wheel_joint" type="revolute">
+      <parent>base_link</parent><child>left_wheel</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+    <link name="right_wheel">
+      <pose>0 -0.19 0.08 0 0 0</pose>
+      <inertial>
+        <mass>0.20</mass>
+        <!-- Solid cylinder about y: Iyy=m*r^2/2; Ixx=Izz=m*(3*r^2+w^2)/12. -->
+        <inertia><ixx>0.000326667</ixx><iyy>0.00064</iyy><izz>0.000326667</izz></inertia>
+      </inertial>
+      <collision name="wheel_collision">
+        <pose>0 0 0 1.570796327 0 0</pose>
+        <geometry><cylinder><radius>0.08</radius><length>0.02</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="wheel_visual">
+        <pose>0 0 0 1.570796327 0 0</pose>
+        <geometry><cylinder><radius>0.08</radius><length>0.02</length></cylinder></geometry>
+        <material><ambient>0.06 0.06 0.07 1</ambient><diffuse>0.06 0.06 0.07 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="right_wheel_joint" type="revolute">
+      <parent>base_link</parent><child>right_wheel</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+    <!-- Frictionless spherical support: a simplified caster contact. -->
+    <link name="front_support">
+      <pose>0.18 0 0.03 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia><ixx>0.000018</ixx><iyy>0.000018</iyy><izz>0.000018</izz></inertia>
+      </inertial>
+      <collision name="support_collision">
+        <geometry><sphere><radius>0.03</radius></sphere></geometry>
+        <surface><friction><ode><mu>0</mu><mu2>0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="support_visual">
+        <geometry><sphere><radius>0.03</radius></sphere></geometry>
+        <material><ambient>0.35 0.35 0.38 1</ambient><diffuse>0.35 0.35 0.38 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="front_support_joint" type="fixed">
+      <parent>base_link</parent><child>front_support</child>
+    </joint>
+    <!-- Frictionless spherical support: a simplified caster contact. -->
+    <link name="rear_support">
+      <pose>-0.18 0 0.03 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia><ixx>0.000018</ixx><iyy>0.000018</iyy><izz>0.000018</izz></inertia>
+      </inertial>
+      <collision name="support_collision">
+        <geometry><sphere><radius>0.03</radius></sphere></geometry>
+        <surface><friction><ode><mu>0</mu><mu2>0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="support_visual">
+        <geometry><sphere><radius>0.03</radius></sphere></geometry>
+        <material><ambient>0.35 0.35 0.38 1</ambient><diffuse>0.35 0.35 0.38 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="rear_support_joint" type="fixed">
+      <parent>base_link</parent><child>rear_support</child>
+    </joint>
+    <plugin filename="libignition-gazebo-diff-drive-system.so"
+            name="ignition::gazebo::systems::DiffDrive">
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+      <wheel_separation>0.38</wheel_separation>
+      <wheel_radius>0.08</wheel_radius>
+      <topic>/warehouse/cmd_vel</topic>
+      <odom_topic>/warehouse/odom</odom_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>warehouse_robot/base_link</child_frame_id>
+      <odom_publish_frequency>20</odom_publish_frequency>
+      <max_linear_velocity>0.6</max_linear_velocity>
+      <min_linear_velocity>-0.6</min_linear_velocity>
+      <max_angular_velocity>1.5</max_angular_velocity>
+      <min_angular_velocity>-1.5</min_angular_velocity>
+      <max_linear_acceleration>1.5</max_linear_acceleration>
+      <min_linear_acceleration>-1.5</min_linear_acceleration>
+      <max_angular_acceleration>1.5</max_angular_acceleration>
+      <min_angular_acceleration>-1.5</min_angular_acceleration>
+    </plugin>
+  </model>
+</sdf>
