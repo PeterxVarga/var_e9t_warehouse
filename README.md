@@ -17,7 +17,7 @@ The robot completes pickup jobs on a known aisle network and returns to the depo
 
 ## Status
 
-The warehouse world and differential-drive robot run in headless and graphical Gazebo modes, with ROS 2 velocity commands and odometry feedback. Route planning, autonomous execution, and experiments remain under development.
+The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. Pickup sequencing, route planning, replanning, and comparative experiments remain under development.
 
 ## Development environment
 
@@ -176,8 +176,8 @@ ros2 topic pub --rate 20 /warehouse/cmd_vel geometry_msgs/msg/Twist \
 
 Inspect feedback with `ros2 topic echo /warehouse/odom`. Motion is acceleration
 limited; a zero command produces a short braking interval. The simulation
-currently provides manual velocity control, without autonomous tracking,
-obstacle avoidance, or a command watchdog.
+supports manual commands and the single-goal controller below. Obstacle
+avoidance and an independent drive-side command watchdog are not implemented.
 
 ### Model assumptions and checks
 
@@ -213,3 +213,94 @@ Technical references: [SDF robot construction](https://gazebosim.org/docs/fortre
 The project model and layout use primitive geometry; no tutorial robot or
 external mesh is bundled. Project files are licensed under BSD-3-Clause;
 installed third-party components retain their own licenses.
+
+## Single-goal control
+
+The `warehouse_control` package tracks one fixed goal in the `odom` frame.
+The tracking calculation is implemented in `control.py`, independently of
+ROS transport: rotate in place for large heading errors, then advance with
+bounded proportional steering and slow down near the goal. It does not plan
+a collision-free route; use goals in known free space.
+
+In the workspace container, build both packages and start a fresh simulation:
+
+```bash
+colcon build --packages-select warehouse_sim warehouse_control
+source install/setup.bash
+ros2 launch warehouse_sim simulation.launch.py headless:=true
+```
+
+In another container shell, run the controller:
+
+```bash
+source /opt/ros/humble/setup.bash
+source /workspace/install/setup.bash
+ros2 run warehouse_control goal_controller --ros-args \
+  -p use_sim_time:=true -p target_x:=1.0 -p target_y:=0.0
+```
+
+Only one velocity-command publisher should run at a time. Stop any manual
+publisher before starting the controller. With the initial robot pose, the
+example goal corresponds to world (-3, -3) m. These are absolute odometry
+coordinates, not a relative displacement from wherever the robot currently
+stands. Start a fresh simulation for repeatable tests.
+
+| Startup parameter | Default | Meaning |
+|---|---|---|
+| `target_x`, `target_y` | 1.0, 0.0 m | Goal in `odom` |
+| `goal_tolerance` | 0.05 m | Wheel-odometry arrival tolerance |
+| `max_linear_speed` | 0.15 m/s | Forward speed limit |
+| `max_angular_speed` | 0.60 rad/s | Yaw-rate limit |
+| `linear_gain`, `angular_gain` | 0.5, 1.5 1/s | Proportional gains |
+| `turn_threshold` | 0.35 rad | Above this error, rotate without advancing |
+| `odom_timeout` | 1.0 s | Wall-time feedback timeout and maximum ROS-time stamp offset |
+
+These control parameters are read-only after startup. Commands use a 20 Hz
+steady-clock timer; this is not a real-time guarantee. The odometry subscriber
+uses best-effort, volatile, keep-last 1 QoS; commands are reliable, volatile,
+keep-last 1. Simulation runs require `use_sim_time:=true`.
+
+The node initially publishes zero while waiting for valid feedback.
+`TRACKING` requires finite planar pose values, valid orientation, the expected
+frames, and advancing timestamps near ROS time. Invalid feedback, stale or
+persistently repeated timestamps, or a backwards clock jump lead to a latched `FAULT` and zero
+commands. The wall-time timeout continues even when simulation time stops.
+Arrival latches `REACHED`; the node stays alive publishing zero. Restart the
+controller to clear either terminal state or select another goal.
+
+Ctrl+C and SIGTERM request zero before closing the ROS context. This is
+not an independent drive-side command watchdog: a crash, SIGKILL, or loss
+of the command bridge can prevent stopping, and DiffDrive can retain the
+last command. Wheel odometry can differ from the physical model pose.
+
+### Controller checks
+
+Run the deterministic calculation tests:
+
+```bash
+colcon test --packages-select warehouse_control --event-handlers console_direct+
+colcon test-result --verbose
+```
+
+All 50 tests passed. Installed-package checks also ran from `/tmp`.
+Representative headless runs independently sampled Gazebo model poses,
+with the goal converted into world coordinates:
+
+| Goal in odom (m) | Settled odometry error | Settled physical error |
+|---|---|---|
+| (1.0, 0.0) | 0.049 m | 0.049 m |
+| (0.0, -0.75) | 0.049 m | 0.069 m |
+
+Both goals reached the 0.05 m odometry tolerance within 60 simulated seconds.
+After braking, no further physical displacement was observed over two
+simulated seconds. A controlled feedback interruption, with the command
+bridge still running, produced a stop request after 1.04 wall seconds and
+remained stopped when feedback returned. Isolated ROS checks covered absent
+feedback, repeated timestamps, invalid frames/orientation/non-finite position,
+stale timestamps, and paused/backwards clocks. Ctrl+C and SIGTERM stop checks
+passed with the physical model remaining stationary after braking.
+These are initial integration checks, not statistical route-planning results.
+
+ROS infrastructure references: [Python publisher/subscriber](https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Py-Publisher-And-Subscriber.html),
+[QoS compatibility](https://docs.ros.org/en/humble/Concepts/Intermediate/About-Quality-of-Service-Settings.html),
+and [rclpy node API](https://docs.ros.org/en/humble/p/rclpy/api/node.html).
