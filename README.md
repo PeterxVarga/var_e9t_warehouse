@@ -17,7 +17,7 @@ The robot completes pickup jobs on a known aisle network and returns to the depo
 
 ## Status
 
-The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. Pickup sequencing, route planning, replanning, and comparative experiments remain under development.
+The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. Pickup sequencing, route execution, replanning, and comparative experiments remain under development.
 
 ## Development environment
 
@@ -304,3 +304,108 @@ These are initial integration checks, not statistical route-planning results.
 ROS infrastructure references: [Python publisher/subscriber](https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Py-Publisher-And-Subscriber.html),
 [QoS compatibility](https://docs.ros.org/en/humble/Concepts/Intermediate/About-Quality-of-Service-Settings.html),
 and [rclpy node API](https://docs.ros.org/en/humble/p/rclpy/api/node.html).
+
+## Static aisle graph planning
+
+The separate `warehouse_planning` ament_python package provides a validated
+undirected graph and its own heapq-based Dijkstra implementation. It uses no
+NetworkX or other graph solver. Edge costs are Euclidean distances in metres;
+shortest paths are optimal only on the supplied graph, not over all continuous
+paths through the warehouse. Equal-cost choices are deterministic: neighbors
+and heap entries use node identifier ordering, and an equal-cost alternative
+does not replace the first predecessor.
+
+Build and source the installed packages inside the ROS container:
+
+```bash
+colcon build --packages-up-to warehouse_planning
+source install/setup.bash
+cd /tmp
+ros2 run warehouse_planning route_example --start r0c0 --goal r3c2
+```
+
+The configuration and SDF are resolved through `ament_index_python` from the
+installed `warehouse_planning` and `warehouse_sim` share directories. No source
+workspace or current-directory lookup is required. The example prints:
+
+```text
+Frame: world
+Nodes: r0c0 -> r1c0 -> r2c0 -> r3c0 -> r3c1 -> r3c2
+Coordinates (m): (-4, -3) -> (-4, -1) -> (-4, 1) -> (-4, 3) -> (-2, 3) -> (0, 3)
+Total route length: 10 m
+```
+
+The graph has 20 nodes and 22 undirected edges. Rows use y = -3, -1, 1, 3;
+columns use x = -4, -2, 0, 2, 4. Node identifiers are `r0c0` through `r3c4`.
+Every row connects adjacent columns; only the outer columns connect adjacent
+rows. The depot is `r0c0`, at world (-4, -3) m. The example's straight-line
+distance is approximately 7.21 m, but that segment crosses shelves.
+
+The JSON uses `schema_version: 1`, `frame: "world"`, `depot`, a `nodes` list
+of records with exactly `id`, `x`, `y`, and an `edges` list of identifier pairs.
+Validation rejects unsupported versions/frames, invalid types, boolean or
+non-finite coordinates, empty/duplicate identifiers, unknown endpoints,
+self-loops, duplicate undirected edges and zero/non-finite edge lengths.
+Duplicate JSON keys and unexpected record fields are also rejected.
+
+An optional `--graph PATH` selects another JSON file, still checked against
+the installed warehouse geometry. Invalid input or geometry returns exit code
+1; an unreachable target returns exit code 2 with no straight-line fallback.
+Unknown endpoints are errors. Identical endpoints return one node and 0 m.
+The reusable `shortest_path(graph, start_id, goal_id)` returns `(node_list,
+cost_m)` or `None` for an unreachable target without changing the graph.
+
+### Geometry assumptions and limits
+
+Before planning, the CLI reads actual collision boxes from the installed
+`warehouse_sim/worlds/warehouse.sdf`. It requires the three named shelf rows
+and four perimeter walls. Floor geometry is validated and excluded, the
+visual-only depot marker is excluded, and the local included warehouse robot
+is verified to be dynamic and excluded. Missing/duplicate models, unexpected
+objects, extra collisions, nested models, unsupported geometry or unsupported
+transforms fail the check instead of reporting success.
+
+Support is limited to the current SDF 1.8 world with axis-aligned boxes and
+translation-only model, link and collision poses in implicit parent frames.
+Rotations and explicit frame references are rejected. Each obstacle's XY
+rectangle is expanded by 0.45 m on all sides. Every node and the full closed
+segment of every edge is checked; touching an expanded boundary counts as a
+collision. The check uses XY projections regardless of obstacle height.
+The 0.45 m radius is a conservative geometric assumption, not a measured
+safety guarantee. This static check does not account for dynamic obstacles,
+tracking errors or braking distance.
+
+The CLI prints a route and does not control the robot. The graph uses `world`,
+whereas `warehouse_control` uses `odom`. No transformation or route follower
+connects them yet. Pickup ordering and dynamic replanning are not implemented.
+
+### Planner checks
+
+From the workspace directory after building and sourcing:
+
+```bash
+colcon test --packages-select warehouse_planning warehouse_control \
+  --event-handlers console_direct+ --return-code-on-test-failure
+colcon test-result --verbose
+```
+
+The tests cover hand-computable and weighted examples, direction reversal,
+identical endpoints, disconnected graphs, unknown identifiers, deterministic
+ties, invalid input and unchanged graph data. A separate test-only
+Floyd–Warshall implementation compares all-pairs costs, including all 400
+pairs in the real warehouse graph. Geometry tests check every real node and
+edge, shelf-crossing and boundary-touching segments, and missing, unexpected
+or unsupported obstacles/transforms. Installed CLI checks run from a temporary
+directory under `/tmp`, covering the 10 m example and nonzero exits for
+disconnected input, malformed input and unknown endpoints.
+
+Validation in a fresh rootless Podman container with ROS 2 Humble built all
+three workspace packages successfully. All 108 planner tests and the 50
+existing controller calculation tests passed: 158 tests, 0 errors, 0 failures,
+0 skipped. The installed CLI also ran directly from `/tmp`, producing the
+10 m route; a graph with no edges returned exit code 2. These checks did not
+rerun robot motion or simulation experiments.
+
+Algorithm reference: E. W. Dijkstra, “A note on two problems in connexion with
+graphs,” *Numerische Mathematik* 1, 269–271 (1959).
+[doi:10.1007/BF01386390](https://doi.org/10.1007/BF01386390).
