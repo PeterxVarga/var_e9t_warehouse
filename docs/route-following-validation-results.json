@@ -1,0 +1,516 @@
+{
+  "date": "2026-10-10",
+  "base_commit": "8286d3076aeea5a4c2f9fd0f4cd6bbf8ae76949c",
+  "environment": {
+    "image": "localhost/var-e9t-warehouse:humble",
+    "image_id": "9d36a750d194",
+    "ros": "Humble",
+    "gazebo": "Fortress 6.18.0",
+    "python": "3.10.12",
+    "pytest": "6.2.5",
+    "default_domain": 77,
+    "diagnostic_domain": 78,
+    "moved_start_domain": 79
+  },
+  "package_tests": {
+    "passed": 242,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "warehouse_control": 134,
+    "warehouse_planning": 108
+  },
+  "default_case_totals": {
+    "passed": 8,
+    "failed": 2
+  },
+  "physical_route_acceptance": false,
+  "default_results": [
+    {
+      "case": "ctrl_c",
+      "passed": true,
+      "start_sim": 0.5710000000000001,
+      "terminal_sim": 5.069,
+      "execution_sim_seconds": 4.498,
+      "wall_seconds": 10.515447916000994,
+      "physical_samples": 628,
+      "max_physical_gap_seconds": 0.018000000000000682,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.005000000000001,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -3.9864564358350254,
+        -2.892180453615153,
+        1.5427458810032542
+      ],
+      "final_odom_pose": [
+        0.020055360521452844,
+        0.10726696310740354,
+        1.4789303134592866
+      ],
+      "final_command": [
+        4.736,
+        7.2804386079988035,
+        0.0,
+        0.0
+      ],
+      "signal_sim": 4.735,
+      "signal_node_pid": null,
+      "controller_parameters": [],
+      "physical_distance_m": 0.10892281760201343,
+      "odom_distance_m": 0.10934887445992708,
+      "fault_latched": false
+    },
+    {
+      "case": "sigterm",
+      "passed": true,
+      "start_sim": 0.52,
+      "terminal_sim": 4.743,
+      "execution_sim_seconds": 4.223000000000001,
+      "wall_seconds": 10.260438492998219,
+      "physical_samples": 613,
+      "max_physical_gap_seconds": 0.018000000000000238,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.015000000000001,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -3.9887053630855576,
+        -2.891278751885064,
+        1.5560067688211152
+      ],
+      "final_odom_pose": [
+        0.017981078644538625,
+        0.10827050606031653,
+        1.4912732152942285
+      ],
+      "final_command": [
+        4.415,
+        6.914034334997268,
+        0.0,
+        0.0
+      ],
+      "signal_sim": 4.414,
+      "signal_node_pid": 1957,
+      "controller_parameters": [],
+      "physical_distance_m": 0.10953211746988409,
+      "odom_distance_m": 0.10994898969182582,
+      "fault_latched": false
+    },
+    {
+      "case": "r3c2",
+      "passed": false,
+      "start_sim": 0.617,
+      "terminal_sim": 82.217,
+      "execution_sim_seconds": 81.6,
+      "wall_seconds": 87.83924234799997,
+      "physical_samples": 5169,
+      "max_physical_gap_seconds": 0.01899999999999835,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.0,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -0.464188880807926,
+        2.9884612010915927,
+        0.00013267860784256318
+      ],
+      "final_odom_pose": [
+        3.9510169634895,
+        6.000009341063416,
+        -0.00019069997258549715
+      ],
+      "final_command": [
+        88.215,
+        90.88198761400054,
+        0.0,
+        0.0
+      ],
+      "signal_sim": null,
+      "signal_node_pid": null,
+      "controller_parameters": [],
+      "physical_distance_m": 9.906532270635443,
+      "odom_distance_m": 9.90758050554876,
+      "odom_error_m": 0.04898303740117041,
+      "physical_error_m": 0.4643322742885353,
+      "planned_length_m": 10.0,
+      "gates": {
+        "odom_accuracy": true,
+        "physical_accuracy": false,
+        "execution_time": true,
+        "sampled_clearance": true,
+        "stopped": true,
+        "waypoint_order": true
+      },
+      "waypoints": [
+        "r0c0",
+        "r1c0",
+        "r2c0",
+        "r3c0",
+        "r3c1",
+        "r3c2"
+      ]
+    },
+    {
+      "case": "r2c2",
+      "passed": false,
+      "start_sim": 0.515,
+      "terminal_sim": 66.843,
+      "execution_sim_seconds": 66.328,
+      "wall_seconds": 72.58556247600063,
+      "physical_samples": 4272,
+      "max_physical_gap_seconds": 0.018000000000000682,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.016000000000005,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -0.32303012230169986,
+        0.993114123544704,
+        7.496521251086178e-05
+      ],
+      "final_odom_pose": [
+        3.9524057567043025,
+        4.000009614845192,
+        -0.00020201698714727173
+      ],
+      "final_command": [
+        72.841,
+        75.3804726979979,
+        0.0,
+        0.0
+      ],
+      "signal_sim": null,
+      "signal_node_pid": null,
+      "controller_parameters": [],
+      "physical_distance_m": 7.908078684269587,
+      "odom_distance_m": 7.909162209083589,
+      "odom_error_m": 0.04759424426687848,
+      "physical_error_m": 0.3231035054108958,
+      "planned_length_m": 8.0,
+      "gates": {
+        "odom_accuracy": true,
+        "physical_accuracy": false,
+        "execution_time": true,
+        "sampled_clearance": true,
+        "stopped": true,
+        "waypoint_order": true
+      },
+      "waypoints": [
+        "r0c0",
+        "r1c0",
+        "r2c0",
+        "r2c1",
+        "r2c2"
+      ]
+    },
+    {
+      "case": "odom_loss",
+      "passed": true,
+      "start_sim": 0.531,
+      "terminal_sim": 5.547,
+      "execution_sim_seconds": 5.016,
+      "wall_seconds": 11.029638906999025,
+      "physical_samples": 658,
+      "max_physical_gap_seconds": 0.018000000000000682,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.0009999999999994,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -3.9992705662819525,
+        -2.739090588045958,
+        1.7174353716527397
+      ],
+      "final_odom_pose": [
+        0.01800893742443621,
+        0.2608664223297997,
+        1.644219594003935
+      ],
+      "final_command": [
+        11.544,
+        13.93817520799712,
+        0.0,
+        0.0
+      ],
+      "signal_sim": 4.525,
+      "signal_node_pid": null,
+      "controller_parameters": [],
+      "physical_distance_m": 0.26220320598526853,
+      "odom_distance_m": 0.26246651836261703,
+      "fault_latched": true
+    },
+    {
+      "case": "invalid_goal",
+      "passed": true,
+      "start_sim": 0.619,
+      "terminal_sim": 1.9060000000000001,
+      "execution_sim_seconds": 1.2870000000000001,
+      "wall_seconds": 7.317091086999426,
+      "physical_samples": 440,
+      "max_physical_gap_seconds": 0.018000000000000016,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.016,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -4,
+        -3,
+        5.363909780873433e-22
+      ],
+      "final_odom_pose": [
+        -4.901656176045449e-19,
+        4.9187950017315255e-37,
+        -1.0707652008743315e-18
+      ],
+      "final_command": null,
+      "signal_sim": null,
+      "signal_node_pid": null,
+      "controller_parameters": [],
+      "physical_distance_m": 0.0,
+      "odom_distance_m": 5.405240348716846e-19,
+      "fault_latched": false
+    },
+    {
+      "case": "unreachable",
+      "passed": true,
+      "start_sim": 0.626,
+      "terminal_sim": 1.929,
+      "execution_sim_seconds": 1.303,
+      "wall_seconds": 7.316573140000401,
+      "physical_samples": 440,
+      "max_physical_gap_seconds": 0.017999999999999794,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.0,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -4,
+        -3,
+        5.363909780873433e-22
+      ],
+      "final_odom_pose": [
+        -4.901656176045449e-19,
+        4.9187950017315255e-37,
+        -1.0707652008743315e-18
+      ],
+      "final_command": null,
+      "signal_sim": null,
+      "signal_node_pid": null,
+      "controller_parameters": [],
+      "physical_distance_m": 0.0,
+      "odom_distance_m": 5.405240348716846e-19,
+      "fault_latched": false
+    },
+    {
+      "case": "invalid_start",
+      "passed": true,
+      "start_sim": 0.618,
+      "terminal_sim": 1.798,
+      "execution_sim_seconds": 1.1800000000000002,
+      "wall_seconds": 7.195913797000685,
+      "physical_samples": 433,
+      "max_physical_gap_seconds": 0.018000000000000682,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.0,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -4,
+        -3,
+        5.363909780873433e-22
+      ],
+      "final_odom_pose": [
+        -4.897767020042662e-19,
+        4.914630887093347e-37,
+        -1.0708117042450386e-18
+      ],
+      "final_command": [
+        7.806,
+        10.290847248998034,
+        0.0,
+        0.0
+      ],
+      "signal_sim": null,
+      "signal_node_pid": null,
+      "controller_parameters": [],
+      "physical_distance_m": 0.0,
+      "odom_distance_m": 5.389990185553663e-19,
+      "fault_latched": true
+    },
+    {
+      "case": "single_goal",
+      "passed": true,
+      "start_sim": 0.608,
+      "terminal_sim": 10.001,
+      "execution_sim_seconds": 9.392999999999999,
+      "wall_seconds": 15.43009871599861,
+      "physical_samples": 917,
+      "max_physical_gap_seconds": 0.018000000000000682,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.003,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -3.047588526335727,
+        -2.9999999999997695,
+        1.7470436107210114e-12
+      ],
+      "final_odom_pose": [
+        0.9524114738058271,
+        4.1459997277506814e-15,
+        2.1240319439716625e-12
+      ],
+      "final_command": [
+        15.982,
+        18.334658112999023,
+        0.0,
+        0.0
+      ],
+      "signal_sim": null,
+      "signal_node_pid": null,
+      "controller_parameters": [],
+      "physical_distance_m": 0.9524114736642728,
+      "odom_distance_m": 0.9524114738058271,
+      "odom_error_m": 0.047588526194172864,
+      "physical_error_m": 0.04758852633572719,
+      "planned_length_m": 1,
+      "gates": {
+        "odom_accuracy": true,
+        "physical_accuracy": true,
+        "execution_time": true,
+        "sampled_clearance": true,
+        "stopped": true
+      }
+    },
+    {
+      "case": "moved_start",
+      "passed": true,
+      "start_sim": 2.301,
+      "terminal_sim": 3.154,
+      "execution_sim_seconds": 0.8529999999999998,
+      "wall_seconds": 6.959702508000191,
+      "physical_samples": 520,
+      "max_physical_gap_seconds": 0.018000000000000682,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.0,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -3.885550000177886,
+        -3.00000000000004,
+        1.3819633830536213e-12
+      ],
+      "final_odom_pose": [
+        0.1144500000000008,
+        6.9638255449923064e-15,
+        8.507814330058663e-13
+      ],
+      "final_command": [
+        9.151,
+        11.737317850002,
+        0.0,
+        0.0
+      ],
+      "signal_sim": null,
+      "signal_node_pid": null,
+      "controller_parameters": [],
+      "physical_distance_m": 0.11444999982211401,
+      "odom_distance_m": 0.1144500000000008,
+      "fault_latched": true,
+      "controller_start_world_xy": [
+        -3.885550000177886,
+        -3.00000000000004
+      ],
+      "controller_motion_m": 0.0
+    }
+  ],
+  "slow_turn_diagnostic": [
+    {
+      "case": "r3c2",
+      "passed": false,
+      "start_sim": 0.514,
+      "terminal_sim": 89.55,
+      "execution_sim_seconds": 89.036,
+      "wall_seconds": 95.36116853600106,
+      "physical_samples": 5611,
+      "max_physical_gap_seconds": 0.018000000000000682,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.015999999999991,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "final_physical_pose": [
+        -0.5515060528619454,
+        2.981059888148264,
+        0.0002101345773192003
+      ],
+      "final_odom_pose": [
+        3.951557667022444,
+        5.999995995792099,
+        8.265925976376393e-05
+      ],
+      "final_command": [
+        95.549,
+        98.26431624799807,
+        0.0,
+        0.0
+      ],
+      "signal_sim": null,
+      "signal_node_pid": null,
+      "controller_parameters": [
+        "max_angular_speed:=0.2"
+      ],
+      "physical_distance_m": 9.914307762647764,
+      "odom_distance_m": 9.914782138247217,
+      "odom_error_m": 0.0484423331430483,
+      "physical_error_m": 0.5518311826820945,
+      "planned_length_m": 10.0,
+      "gates": {
+        "odom_accuracy": true,
+        "physical_accuracy": false,
+        "execution_time": true,
+        "sampled_clearance": true,
+        "stopped": true,
+        "waypoint_order": true
+      },
+      "waypoints": [
+        "r0c0",
+        "r1c0",
+        "r2c0",
+        "r3c0",
+        "r3c1",
+        "r3c2"
+      ]
+    }
+  ],
+  "raw_artifact_directories": [
+    "log/route-validation/final-corrected",
+    "log/route-validation/moved-start",
+    "log/route-validation/slow-turn-diagnostic"
+  ],
+  "source_sha256": {
+    "src/warehouse_control/setup.py": "ca454870402ac76a0849021a81f642a671515599c7e4fb935cb355eec842b86b",
+    "src/warehouse_control/test/test_control.py": "d5a50ba5c8bc4e2f34046336875a9400440454bdc971d5f568a90743d868504d",
+    "src/warehouse_control/test/test_controller.py": "72653aaf1aa33173f3dd61137cbf873bbd0f6aafad2c1bc3c196ab493611d799",
+    "src/warehouse_control/test/test_route.py": "5da3ed53fe11070871268d0b8b4b08caa9f382344e31f37ba777125b44813313",
+    "src/warehouse_control/warehouse_control/__init__.py": "83e90a54fab08e70ab493cc14800fc4c54623174eb0bbf73011c1ee3f781b529",
+    "src/warehouse_control/warehouse_control/control.py": "4f99f4cd8d65d1b47179cff86d3ec15e1323021c94f233c5c7005675cf6003f6",
+    "src/warehouse_control/warehouse_control/goal_controller.py": "b5db3f295553b82cacbccc2f87bb73dae2f49364f2b803bdb6abe88217f4d6db",
+    "src/warehouse_control/warehouse_control/route.py": "2b1ad8ed72b5cca109dd9e3d578939d08b74df865d2c50a279fa8fbb7d915b67",
+    "src/warehouse_control/warehouse_control/route_controller.py": "895fa19e8065c4d233e40e333a79ad8f961377d4ee5a43bdeab5a51a920615bb",
+    "src/warehouse_control/package.xml": "28817e004ce7c29e0e0e365a36117209ee25ffc65139b2ebfe6dfddb7e40b738",
+    "scripts/validate_route_following.py": "f483e041cc896ff0971db086cc20317005f80770bc033d70e77e8d3825adf3f4"
+  }
+}

@@ -107,7 +107,11 @@
             name="ignition::gazebo::systems::DiffDrive">
       <left_joint>left_wheel_joint</left_joint>
       <right_joint>right_wheel_joint</right_joint>
-      <wheel_separation>0.38</wheel_separation>
+      <!-- Calibrated effective rolling track for Fortress/DART contact dynamics.
+           Physical wheel centers remain 0.38 m apart. Repeated +/-0.6 rad/s
+           yaw measurements imply 0.362987 m, rounded to 0.363 m.
+           See docs/odometry-diagnostics.md; this is not online localization. -->
+      <wheel_separation>0.363</wheel_separation>
       <wheel_radius>0.08</wheel_radius>
       <topic>/warehouse/cmd_vel</topic>
       <odom_topic>/warehouse/odom</odom_topic>

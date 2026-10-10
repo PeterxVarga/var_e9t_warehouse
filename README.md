@@ -17,7 +17,7 @@ The robot completes pickup jobs on a known aisle network and returns to the depo
 
 ## Status
 
-The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. Pickup sequencing, route execution, replanning, and comparative experiments remain under development.
+The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Its Humble build and all 242 package tests pass. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. Pickup sequencing, replanning, and comparative experiments remain under development.
 
 ## Development environment
 
@@ -191,11 +191,17 @@ The built-in Gazebo DiffDrive plugin provides wheel control and wheel-based
 odometry. These are simulation components, separate from the planned route
 optimizer. Contact effects can cause wheel odometry to differ from actual
 model motion; odometry covariance is not a measured uncertainty estimate.
+Physical wheel centers remain 0.38 m apart. DiffDrive uses a calibrated
+**0.363 m effective rolling track**, derived offline from repeated yaw
+measurements with the current Fortress/DART contact model. Wheel radius,
+collision tread and inertia are unchanged. This value is specific to the
+validated dynamics; see [the diagnostic evidence](docs/odometry-diagnostics.md).
 
 Checks on the installed package covered stationary stability, motion,
 explicit stopping, command loss, shutdown, and restart. Physical model poses
 were sampled independently from Gazebo and compared with odometry at matching
-simulation timestamps. Representative headless measurements were:
+simulation timestamps. Representative measurements before effective-track
+calibration were:
 
 | Check | Odometry | Gazebo model pose |
 |---|---|---|
@@ -205,7 +211,9 @@ simulation timestamps. Representative headless measurements were:
 
 The robot remained stationary during a 10-second rest check. Odometry averaged
 20 Hz in simulation time. GUI mode also passed forward-motion and stop checks.
-These are integration checks, not route-planning results or real-time guarantees.
+Those measurements and GUI checks predate the effective-track calibration;
+the current calibration checks are headless and described below. These are
+integration checks, not real-time guarantees.
 
 Technical references: [SDF robot construction](https://gazebosim.org/docs/fortress/building_robot/),
 [Gazebo DiffDrive](https://gazebosim.org/docs/fortress/moving_robot/), and
@@ -222,10 +230,10 @@ ROS transport: rotate in place for large heading errors, then advance with
 bounded proportional steering and slow down near the goal. It does not plan
 a collision-free route; use goals in known free space.
 
-In the workspace container, build both packages and start a fresh simulation:
+In the workspace container, build the controller and its dependencies and start a fresh simulation:
 
 ```bash
-colcon build --packages-select warehouse_sim warehouse_control
+colcon build --packages-up-to warehouse_control
 source install/setup.bash
 ros2 launch warehouse_sim simulation.launch.py headless:=true
 ```
@@ -282,7 +290,8 @@ colcon test --packages-select warehouse_control --event-handlers console_direct+
 colcon test-result --verbose
 ```
 
-All 50 tests passed. Installed-package checks also ran from `/tmp`.
+Before aisle-route following and effective-track calibration, all 50
+controller calculation tests passed. Installed-package checks also ran from `/tmp`.
 Representative headless runs independently sampled Gazebo model poses,
 with the goal converted into world coordinates:
 
@@ -299,7 +308,8 @@ remained stopped when feedback returned. Isolated ROS checks covered absent
 feedback, repeated timestamps, invalid frames/orientation/non-finite position,
 stale timestamps, and paused/backwards clocks. Ctrl+C and SIGTERM stop checks
 passed with the physical model remaining stationary after braking.
-These are initial integration checks, not statistical route-planning results.
+These are historical pre-calibration integration checks, not statistical
+route-planning results. Current results are documented under aisle-route following.
 
 ROS infrastructure references: [Python publisher/subscriber](https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Py-Publisher-And-Subscriber.html),
 [QoS compatibility](https://docs.ros.org/en/humble/Concepts/Intermediate/About-Quality-of-Service-Settings.html),
@@ -376,8 +386,9 @@ safety guarantee. This static check does not account for dynamic obstacles,
 tracking errors or braking distance.
 
 The CLI prints a route and does not control the robot. The graph uses `world`,
-whereas `warehouse_control` uses `odom`. No transformation or route follower
-connects them yet. Pickup ordering and dynamic replanning are not implemented.
+whereas `warehouse_control` uses `odom`. The aisle-route follower below connects
+them using the known simulation spawn. Pickup ordering and dynamic replanning
+are not implemented.
 
 ### Planner checks
 
@@ -399,7 +410,8 @@ or unsupported obstacles/transforms. Installed CLI checks run from a temporary
 directory under `/tmp`, covering the 10 m example and nonzero exits for
 disconnected input, malformed input and unknown endpoints.
 
-Validation in a fresh rootless Podman container with ROS 2 Humble built all
+Before adding aisle-route following, validation in a fresh rootless Podman
+container with ROS 2 Humble built all
 three workspace packages successfully. All 108 planner tests and the 50
 existing controller calculation tests passed: 158 tests, 0 errors, 0 failures,
 0 skipped. The installed CLI also ran directly from `/tmp`, producing the
@@ -409,3 +421,134 @@ rerun robot motion or simulation experiments.
 Algorithm reference: E. W. Dijkstra, “A note on two problems in connexion with
 graphs,” *Numerische Mathematik* 1, 269–271 (1959).
 [doi:10.1007/BF01386390](https://doi.org/10.1007/BF01386390).
+
+## Aisle-route following
+
+`warehouse_control/route_controller` prepares a Dijkstra route from the depot
+to one startup-configured `goal_node` (default `r3c2`). It reads the installed
+graph and SDF through `ament_index_python`, checks all graph geometry and the
+depot/spawn agreement, and converts world-frame waypoints to wheel odometry.
+Invalid input or an unreachable goal exits nonzero before creating a command
+publisher. There is no direct-motion fallback.
+
+Build and launch inside the ROS container:
+
+```bash
+colcon build --packages-up-to warehouse_control
+source install/setup.bash
+ros2 launch warehouse_sim simulation.launch.py headless:=true
+```
+
+In a second shell in that container:
+
+```bash
+source /opt/ros/humble/setup.bash
+source /workspace/install/setup.bash
+cd /tmp
+ros2 run warehouse_control route_controller --ros-args \
+  -p use_sim_time:=true -p goal_node:=r3c2
+```
+
+**Use a fresh simulation for every route. Run only one velocity-command
+publisher:** stop the single-goal controller and manual publishers first.
+The follower has no arbitrary-position start, return-to-depot maneuver,
+localization, or follower restart after the robot has moved.
+
+The known frame relationship is `p_world = t + R(yaw_spawn) p_odom`.
+Translation and yaw come from the robot include pose in the installed SDF,
+not from the current feedback or a second hard-coded origin. With the current
+spawn, world (-4, -3), (-4, 3), and (0, 3) m map to odom (0, 0), (0, 6),
+and (4, 6) m. The transform calculation supports yaw rotation, but the current
+SDF geometry validator still requires translation-only poses.
+
+The first fresh pose used for control must be within 0.05 m and 0.05 rad of
+the expected odom origin; otherwise the node latches `FAULT` without moving.
+This check does not independently establish the physical world pose. The
+fresh-simulation condition remains necessary. Startup tolerances are explicit
+assumptions, not measured localization uncertainty.
+
+Waypoints are followed in order using the existing bounded goal calculation.
+Each intermediate arrival sends zero and advances exactly one index; following
+the next leg starts on the next tick. Only the last waypoint latches `REACHED`.
+Selecting the depot yields a zero-length route and no motion. Route logs give
+the frame transform, planned node sequence and length, waypoint arrivals, and
+terminal state. Parameters are read-only; the follower shares the control
+gains, speed limits, odometry checks, watchdog, and shutdown runner of the
+single-goal node. `target_x` and `target_y` apply only to the single-goal node.
+
+### Route-following checks and remaining validation
+
+The source-level suite can run without ROS (with Python 3.10+ and pytest):
+
+```bash
+PYTHONPATH=src/warehouse_control:src/warehouse_planning \
+  python3 -m pytest src/warehouse_control/test src/warehouse_planning/test -q
+```
+
+The original non-ROS run passed 222 tests: 157 existing calculation/geometry tests and 65 new
+route tests. Two items were skipped because ROS was unavailable: the existing
+installed planner CLI check and the ROS-node callback test module. The callback
+tests capture commands rather than sending them to a simulator. They cover
+the shared single-goal behavior, route progression, invalid starts, feedback
+faults, terminal-state latching and runner cleanup. Humble validation on
+2026-10-10 passed all 242 tests (134 control and 108 planning), with no skips.
+The ROS command-capture fixture was corrected to intercept only the Twist
+publisher on `/warehouse/cmd_vel`, preserving internal ROS parameter publishers.
+
+Route tests cover hand-computed transforms, malformed spawn poses, depot
+mismatch, unreachable targets, copied route data, startup tolerances, ordered
+waypoints, in-place turns and final arrival. Two additional ideal unicycle
+calculations follow the real 10 m outer route (`r3c2`) and 8 m inner route
+(`r2c2`), arriving within 180 simulated seconds and 0.05 m of the odom goal.
+All sampled segments avoid the static obstacles expanded by the robot's
+0.3202 m bounding-circle radius. These calculations assume perfect odometry
+and instantaneous velocity response; they are not Gazebo, contact, physical
+accuracy, or braking validation.
+
+In the Humble container, run the installed-package checks:
+
+```bash
+colcon test --packages-select warehouse_control warehouse_planning \
+  --event-handlers console_direct+ --return-code-on-test-failure
+colcon test-result --verbose
+```
+
+Headless Humble/Fortress checks from `/tmp` completed on 2026-10-10.
+The [initial validation](docs/route-following-validation.md) failed physical
+accuracy because turn-induced odometry disagreement accumulated on straight
+legs. Repeated primitive measurements supported an offline effective-track
+calibration in the robot's DiffDrive plugin.
+
+Both original routes and the reserved 14 m `r3c4` route subsequently passed
+all gates in **three fresh runs each**: complete waypoint order, at most 180
+simulation seconds, at most 0.05 m odom error, at most **0.15 m physical error**,
+zero commands, sampled obstacle clearance with a 0.3202 m robot circle, and at
+least five seconds of independently verified physical rest. Physical error ranges:
+
+- `r3c2`: 0.0272–0.0280 m.
+- `r2c2`: 0.0337–0.0348 m.
+- `r3c4`: 0.0538–0.0550 m.
+
+The effective track was fitted from six standalone turns, without using any
+route outcome. `r3c4` was declared before fitting and first run after the value
+was frozen. Gazebo world pose remains verification data; the controller uses
+wheel odometry and the known static spawn transform.
+
+Odometry interruption with the command bridge alive, feedback recovery without
+rearming, actual terminal Ctrl+C, direct node SIGTERM, invalid/unreachable goals,
+invalid and physically moved starts, and a fresh single-goal regression passed.
+The shared shutdown runner now handles SIGINT/SIGTERM with a stop flag and a
+bounded spin instead of raising asynchronously inside ROS calls.
+
+See the [repeated diagnostic measurements and limitations](docs/odometry-diagnostics.md),
+[historical pre-calibration record](docs/route-following-validation.md), and
+opt-in [integration harness](scripts/validate_route_following.py). The harness
+returns nonzero when any route gate fails. A single effective track does not
+remove all rate-dependent yaw bias; changed contact dynamics require validation.
+
+The planned graph length, executed odom/physical distance, and execution time
+are different measurements. Static graph checks do not bound wheel slip,
+tracking error, continuous clearance, or braking distance. There is still no
+independent drive watchdog, dynamic obstacle detection, or replanning;
+SIGKILL, a crash, or command-bridge loss can prevent a stop command reaching
+the robot.

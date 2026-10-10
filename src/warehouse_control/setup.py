@@ -13,10 +13,11 @@ setup(
     zip_safe=True,
     maintainer='Péter Varga',
     maintainer_email='vargapeter389@gmail.com',
-    description='Odometry-based goal tracking for the warehouse robot.',
+    description='Odometry-based goal and aisle-route tracking for the warehouse robot.',
     license='BSD-3-Clause',
     tests_require=['pytest'],
     entry_points={'console_scripts': [
         'goal_controller = warehouse_control.goal_controller:main',
+        'route_controller = warehouse_control.route_controller:main',
     ]},
 )
