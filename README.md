@@ -17,7 +17,7 @@ The robot completes pickup jobs on a known aisle network and returns to the depo
 
 ## Status
 
-The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Its Humble build and all 242 package tests pass. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. Pickup sequencing, replanning, and comparative experiments remain under development.
+The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning with depot return is available as a Python API. Optimized pickup sequencing, replanning, and comparative experiments remain under development.
 
 ## Development environment
 
@@ -387,8 +387,8 @@ tracking errors or braking distance.
 
 The CLI prints a route and does not control the robot. The graph uses `world`,
 whereas `warehouse_control` uses `odom`. The aisle-route follower below connects
-them using the known simulation spawn. Pickup ordering and dynamic replanning
-are not implemented.
+them using the known simulation spawn. FIFO mission planning is described
+below; optimized pickup ordering and dynamic replanning are not implemented.
 
 ### Planner checks
 
@@ -421,6 +421,61 @@ rerun robot motion or simulation experiments.
 Algorithm reference: E. W. Dijkstra, “A note on two problems in connexion with
 graphs,” *Numerische Mathematik* 1, 269–271 (1959).
 [doi:10.1007/BF01386390](https://doi.org/10.1007/BF01386390).
+
+## FIFO pickup mission planning
+
+`plan_fifo_mission(graph, pickup_nodes)` starts at `graph.depot`, visits the
+requested nodes in input order, then returns to the depot. Pass a graph from
+`load_graph` or `graph_from_data` whose nodes and edges have already been checked
+against the warehouse obstacle geometry with `validate_geometry`. The graph
+loaders validate graph data, not obstacle clearance; the mission API itself
+does not perform obstacle geometry checks. Pickup nodes are an ordered sequence
+of identifiers, such as a list or tuple. Each leg uses the existing Dijkstra
+`shortest_path` function.
+
+Run this Python example from the repository root, without ROS:
+
+```bash
+PYTHONPATH=src/warehouse_planning python3 - <<'PY'
+from warehouse_planning.mission import plan_fifo_mission
+from warehouse_planning.roadmap import load_graph, load_obstacles, validate_geometry
+
+graph = load_graph("src/warehouse_planning/config/warehouse_graph.json")
+validate_geometry(graph, load_obstacles("src/warehouse_sim/worlds/warehouse.sdf"))
+plan = plan_fifo_mission(graph, ["r2c2", "r1c4"])
+print("Pickup requests:", plan.pickup_nodes)
+for leg in plan.legs:
+    print(f"{leg.start} -> {leg.goal}: {leg.distance_m:g} m")
+print("Route:", plan.nodes)
+print(f"Total planned distance: {plan.total_distance_m:g} m")
+PY
+```
+
+The three legs are `r0c0 -> r2c2` (8 m), `r2c2 -> r1c4` (6 m),
+and `r1c4 -> r0c0` (10 m): **24 m total**.
+
+The frozen result contains `pickup_nodes`, `legs`, `nodes` and
+`total_distance_m`. Each frozen leg contains `start`, `goal`, `nodes` and
+`distance_m`; all node sequences and the leg sequence are tuples. Leg i serves
+request i, and the final leg is the depot return. The concatenated route omits
+the shared node at each leg boundary, while the separate legs retain both
+endpoints. Passing through a later requested node does not fulfill that request
+early. Repeated requests remain separate, including zero-length legs. An empty
+request sequence yields only the depot, no legs and zero distance.
+
+Invalid input, unknown nodes, unreachable legs or a non-finite total distance
+raise `ValueError`; no partial plan is returned. The graph and request sequence
+are not modified. This is a graph-based plan, not robot control or physical
+pickup execution. FIFO does not find a globally optimal pickup order. The API
+does not validate obstacle geometry, localize the robot or connect a mission
+to the route-following controller; no CLI or ROS node is added.
+
+On 2026-10-11, a fresh rootless Humble container built `warehouse_sim` and
+`warehouse_planning` with `colcon build --packages-up-to warehouse_planning`.
+The full planner suite passed **143 tests** (35 new mission tests and 108
+existing planner tests), with 0 errors, 0 failures and 0 skips. The installed
+mission API ran from `/tmp`, and the example above also produced the expected
+24 m plan. No Gazebo motion test was needed for this graph-only change.
 
 ## Aisle-route following
 
