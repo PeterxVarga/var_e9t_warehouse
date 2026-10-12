@@ -19,5 +19,6 @@ setup(
     tests_require=['pytest'],
     entry_points={'console_scripts': [
         'route_example = warehouse_planning.route_example:main',
+        'mission_example = warehouse_planning.mission_example:main',
     ]},
 )

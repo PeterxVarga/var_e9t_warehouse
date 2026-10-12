@@ -17,7 +17,7 @@ The robot completes pickup jobs on a known aisle network and returns to the depo
 
 ## Status
 
-The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning with depot return is available as a Python API. Optimized pickup sequencing, replanning, and comparative experiments remain under development.
+The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning with depot return is available as a Python API and a geometrically checked CLI. Optimized pickup sequencing, replanning, and comparative experiments remain under development.
 
 ## Development environment
 
@@ -468,7 +468,9 @@ raise `ValueError`; no partial plan is returned. The graph and request sequence
 are not modified. This is a graph-based plan, not robot control or physical
 pickup execution. FIFO does not find a globally optimal pickup order. The API
 does not validate obstacle geometry, localize the robot or connect a mission
-to the route-following controller; no CLI or ROS node is added.
+to the route-following controller. The mission CLI below performs the
+prerequisite geometry checks and prints the plan; neither interface controls
+the robot.
 
 On 2026-10-11, a fresh rootless Humble container built `warehouse_sim` and
 `warehouse_planning` with `colcon build --packages-up-to warehouse_planning`.
@@ -476,6 +478,60 @@ The full planner suite passed **143 tests** (35 new mission tests and 108
 existing planner tests), with 0 errors, 0 failures and 0 skips. The installed
 mission API ran from `/tmp`, and the example above also produced the expected
 24 m plan. No Gazebo motion test was needed for this graph-only change.
+
+### Geometrically checked mission CLI
+
+Inside the Humble workspace container, build and source the installed package:
+
+```bash
+colcon build --packages-up-to warehouse_planning
+source install/setup.bash
+cd /tmp
+ros2 run warehouse_planning mission_example --pickups r2c2 r1c4
+```
+
+The CLI locates the installed graph and `warehouse_sim` world through
+`ament_index_python`. It loads the graph, loads the world's obstacles, checks
+every node and edge with `validate_geometry`, then calls `plan_fifo_mission`.
+It uses the existing conservative 0.45 m obstacle inflation and supported SDF
+geometry. The entire graph is checked even for an empty mission or an edge
+outside the selected route. Output is printed only after complete success:
+
+```text
+Frame: world
+Pickup requests: r2c2 -> r1c4
+Pickup 1: r0c0 -> r2c2; distance: 8 m
+Pickup 2: r2c2 -> r1c4; distance: 6 m
+Return: r1c4 -> r0c0; distance: 10 m
+Nodes: r0c0 -> r1c0 -> r2c0 -> r2c1 -> r2c2 -> r2c3 -> r2c4 -> r1c4 -> r0c4 -> r0c3 -> r0c2 -> r0c1 -> r0c0
+Total planned distance: 24 m
+```
+
+`--pickups` is required and accepts zero or more node identifiers. Using only
+`--pickups` explicitly selects an empty mission: no pickup or return legs,
+only the depot node and 0 m total, with the frame and empty request list shown.
+Repeated requests remain numbered separately, including zero-length legs.
+`--graph PATH` overrides the graph JSON, but geometry is still checked against
+the installed warehouse world. Files are never modified.
+
+Exit codes are 0 for success (including `--help`), 1 for loading, geometry or
+mission-planning errors, and 2 for argument syntax errors. Errors go to stderr
+without a partial plan on stdout. This CLI prints a graph plan; it does not
+send velocity commands, perform pickups or optimize the FIFO request order.
+On nonzero exits, Humble's `ros2 run` wrapper additionally prints its own
+`[ros2run]: Process exited with failure ...` status line to stdout; the mission
+entrypoint itself writes errors only to stderr and prints no partial plan.
+
+Validation on 2026-10-12 used a fresh rootless Humble container with the
+`localhost/var-e9t-warehouse:humble` image rebuilt from the unchanged
+Containerfile (image ID `c5df849eb3d9`). Both required packages built successfully.
+The full planner suite passed **159 tests**, including 16 new installed mission
+CLI cases and the existing `route_example` check: 0 errors, 0 failures, 0 skips.
+The CLI cases ran from temporary working directories with 15 s subprocess
+timeouts; the full colcon test run had a 120 s deadline. Error cases also checked
+the installed entrypoint directly to distinguish its streams from the wrapper's
+status line. The output example above matched the installed CLI from `/tmp`.
+No Gazebo motion test was run.
 
 ## Aisle-route following
 
