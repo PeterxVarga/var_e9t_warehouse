@@ -19,5 +19,6 @@ setup(
     entry_points={'console_scripts': [
         'goal_controller = warehouse_control.goal_controller:main',
         'route_controller = warehouse_control.route_controller:main',
+        'mission_controller = warehouse_control.mission_controller:main',
     ]},
 )

@@ -17,7 +17,7 @@ The robot completes pickup jobs on a known aisle network and returns to the depo
 
 ## Status
 
-The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning with depot return is available as a Python API and a geometrically checked CLI. Optimized pickup sequencing, replanning, and comparative experiments remain under development.
+The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning is available as a Python API and a geometrically checked CLI. A separate mission controller executes FIFO requests with simulated service stops and depot return. Optimized pickup sequencing, replanning, and comparative experiments remain under development.
 
 ## Development environment
 
@@ -663,3 +663,59 @@ tracking error, continuous clearance, or braking distance. There is still no
 independent drive watchdog, dynamic obstacle detection, or replanning;
 SIGKILL, a crash, or command-bridge loss can prevent a stop command reaching
 the robot.
+
+## FIFO mission execution
+
+`warehouse_control/mission_controller` executes a complete FIFO graph plan,
+including the depot return, with one velocity publisher. It loads the installed
+graph and world, validates the entire obstacle geometry and depot/SDF spawn
+agreement, and plans all legs before creating the command publisher. Invalid
+requests or unreachable legs exit nonzero without movement; there is no direct
+motion fallback. Wheel odometry must pass the existing fresh-simulation start
+check. Navigation uses wheel odometry and the static SDF spawn transform;
+Gazebo world poses are independent validation data only.
+
+Build, source and launch a fresh simulation inside the workspace container:
+
+```bash
+colcon build --packages-up-to warehouse_control
+source install/setup.bash
+ros2 launch warehouse_sim simulation.launch.py headless:=true
+```
+
+In a second terminal of the same container, load ROS and the installed workspace.
+Do not run another velocity publisher at the same time:
+
+```bash
+source /opt/ros/humble/setup.bash
+source /workspace/install/setup.bash
+ros2 run warehouse_control mission_controller --ros-args \
+  -p use_sim_time:=true \
+  -p "pickup_nodes:=['r2c2','r1c4']"
+```
+
+`pickup_nodes` is a required startup-only, read-only `STRING_ARRAY`. There is
+no default example mission. Explicit `-p 'pickup_nodes:=[]'` selects an empty
+mission: validate the fresh depot start, publish zero, and latch `REACHED`.
+Humble parses a CLI empty array as a present `NOT_SET` override; startup checks
+that override's presence and normalizes it to an empty `STRING_ARRAY` before
+locking the parameter and creating the command publisher. Missing parameters
+and non-array/non-string values fail with an explanatory error.
+
+Each pickup leg follows its planned waypoints, then requests zero velocity for
+at least one continuous simulation second within the 0.05 m odometry tolerance.
+This is simulated service time, not mechanical loading. Both ROS time and fresh
+odometry timestamps must advance; leaving tolerance resets the wait, including
+a departure observed between timer ticks. Feedback validation remains active
+during service. Each request completes separately, including repeated nodes
+and zero-length legs. Passing a later requested node does not serve it early.
+Only the final depot arrival latches global `REACHED`; odometry faults latch
+`FAULT`. Neither terminal state automatically restarts. Waypoint, numbered
+arrival, simulated-service completion and final-depot logs include feedback and
+ROS-clock timestamps. Ctrl+C and direct SIGTERM send a final zero command.
+
+Execution relies on wheel odometry and the known spawn in the current
+Fortress/DART model and installed warehouse geometry. Static graph validation
+does not prove continuous collision safety or hardware accuracy. There is no
+mechanical loading, localization correction, optimized request order,
+replanning, dynamic obstacle avoidance or independent drive watchdog. A crash, SIGKILL or broken command bridge can prevent delivery of zero.
