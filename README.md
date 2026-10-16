@@ -479,6 +479,70 @@ existing planner tests), with 0 errors, 0 failures and 0 skips. The installed
 mission API ran from `/tmp`, and the example above also produced the expected
 24 m plan. No Gazebo motion test was needed for this graph-only change.
 
+### Nearest-neighbor request ordering
+
+`nearest_neighbor_order(graph, pickup_nodes)` returns an immutable tuple of
+**original zero-based request indices**, starting from the depot. At each step,
+it chooses the remaining request with the shortest Dijkstra graph distance
+from the current pickup node. It uses neither straight-line proximity nor edge
+count. Exact distance ties preserve original request order. Repeated nodes and
+depot requests retain separate indices, including zero-distance selections.
+Passing through a later request on a graph path does not service it early.
+
+The input contract matches the FIFO planner: a graph from `load_graph` or
+`graph_from_data` and an ordered sequence of known node identifiers. Invalid
+input, unreachable requests and non-finite Dijkstra distances raise
+`ValueError` without returning a partial order. Inputs are not modified.
+Obstacle geometry validation remains the caller's responsibility.
+
+Run from the repository root, without ROS:
+
+```bash
+PYTHONPATH=src/warehouse_planning python3 - <<'PY'
+from warehouse_planning.mission import plan_fifo_mission
+from warehouse_planning.ordering import nearest_neighbor_order
+from warehouse_planning.roadmap import load_graph, load_obstacles, validate_geometry
+
+graph = load_graph("src/warehouse_planning/config/warehouse_graph.json")
+validate_geometry(graph, load_obstacles("src/warehouse_sim/worlds/warehouse.sdf"))
+requests = ("r1c4", "r2c2", "r1c0")
+indices = nearest_neighbor_order(graph, requests)
+plan = plan_fifo_mission(graph, [requests[i] for i in indices])
+fifo = plan_fifo_mission(graph, requests)
+print("Original request indices:", indices)
+print("Ordered pickups:", plan.pickup_nodes)
+print("Leg distances (m):", tuple(leg.distance_m for leg in plan.legs))
+print(f"FIFO: {fifo.total_distance_m:g} m; nearest-neighbor: {plan.total_distance_m:g} m")
+PY
+```
+
+Expected indices are `(2, 1, 0)`, ordered pickups are
+`('r1c0', 'r2c2', 'r1c4')`, and leg distances are `(2.0, 6.0, 6.0, 10.0)` m.
+Both tours are **24 m** in this example. Keep the original request sequence
+alongside the indices to map each reordered service to its original request.
+The existing FIFO planner builds the legs in the supplied order, adds the
+depot return and checks that the total distance is finite.
+
+This is a greedy heuristic, with no optimality or improvement guarantee. A
+hand-computed test gives 16 m for nearest-neighbor versus 14 m for FIFO. The
+return distance is included in the completed plan, but not in each greedy
+choice. The implementation makes at most n(n+1)/2 Dijkstra calls for n
+requests. It evaluates graph distance only; robot execution time and physical
+accuracy require separate measurements. The CLI and mission controller still
+use FIFO; neither selects this ordering automatically. There is no 2-opt or
+dynamic replanning in this API.
+
+Validation on 2026-10-16 used an owned rootless Humble container with
+`localhost/var-e9t-warehouse:humble` (image `c5df849eb3d9`), Python 3.10.12
+and pytest 6.2.5. All three warehouse packages built with colcon. The complete
+planner and controller suites passed **379 tests** (196 planning, including
+37 new ordering cases; 183 control), with 0 errors, failures or skips.
+After sourcing the installed workspace, the installed API ran from `/tmp`
+and produced the exact order, leg distances and total shown above. The source
+README example also matched that output. The checked commit candidate excluded
+the pending mission-validation changes. No Gazebo motion test was needed for
+this graph-only change; the existing CLI and controller remain FIFO.
+
 ### Geometrically checked mission CLI
 
 Inside the Humble workspace container, build and source the installed package:
