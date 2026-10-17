@@ -543,6 +543,83 @@ README example also matched that output. The checked commit candidate excluded
 the pending mission-validation changes. No Gazebo motion test was needed for
 this graph-only change; the existing CLI and controller remain FIFO.
 
+### Deterministic 2-opt request ordering
+
+`two_opt_order(graph, pickup_nodes, initial_order=None)` returns an immutable
+tuple of original zero-based request indices. The default starting order is
+FIFO. Pass `nearest_neighbor_order(graph, pickup_nodes)` explicitly to improve
+an NN starting tour. `initial_order` must be an ordered sequence containing
+every request index exactly once; bools, non-integers, duplicates, missing
+indices and out-of-range indices raise `ValueError`. Inputs are not modified.
+Repeated nodes and depot requests retain their separate request identities.
+
+The algorithm scans inclusive reversals `(left, right)` with `left` ascending
+from zero and `right` ascending from `left + 1`. It accepts the first strictly
+shorter complete tour and restarts the scan from the beginning. Every candidate
+is fully evaluated as **depot -> pickups -> depot**, including departure and
+return. Equal-cost rearrangements are rejected. Lengths use Dijkstra graph
+distances, canonical endpoint order for each undirected leg and `math.fsum`
+for stable total-distance comparisons. This is graph distance, not Euclidean
+proximity, edge count or robot execution time.
+
+The graph/request contract matches the existing ordering API: use a validated
+`Graph` from the loaders and known node identifiers. Unknown or unreachable
+targets and non-finite leg or complete-tour lengths raise `ValueError` without
+a partial result, including a numerical failure while evaluating a candidate.
+Obstacle geometry validation remains the caller's responsibility.
+
+This abstract graph example runs from the repository root without ROS:
+
+```bash
+PYTHONPATH=src/warehouse_planning python3 - <<'PY'
+from warehouse_planning.mission import plan_fifo_mission
+from warehouse_planning.ordering import nearest_neighbor_order, two_opt_order
+from warehouse_planning.roadmap import graph_from_data
+
+graph = graph_from_data(dict(
+    schema_version=1, frame="world", depot="depot",
+    nodes=[dict(id=node, x=x, y=0) for node, x in
+           [("depot", 0), ("a", 1), ("b", -2), ("c", 5)]],
+    edges=[["depot", "a"], ["depot", "b"], ["a", "c"]]))
+requests = ("b", "a", "c")
+initial = nearest_neighbor_order(graph, requests)
+improved = two_opt_order(graph, requests, initial)
+before = plan_fifo_mission(graph, [requests[i] for i in initial])
+after = plan_fifo_mission(graph, [requests[i] for i in improved])
+print("NN order:", initial)
+print("2-opt order:", improved)
+print(f"Before: {before.total_distance_m:g} m; after: {after.total_distance_m:g} m")
+PY
+```
+
+The result is NN order `(1, 0, 2)`, 2-opt order `(0, 1, 2)` and **16 m -> 14 m**,
+including the depot return. Use the original requests and returned indices to
+construct a plan; passing a later request's node does not service it early.
+
+The result is a **local optimum under contiguous reversals**, not a guaranteed
+global optimum. It cannot worsen the supplied starting tour under its distance
+comparison. An NN start does not guarantee a result better than FIFO; a grid
+test retains an 18 m NN local optimum while FIFO is 16 m. Strict improvement
+prevents cycling, and improving the returned order again leaves it unchanged.
+The search performs full Dijkstra-based tour evaluations and is intended for
+small request sets; floating-point distance precision and the starting order
+still matter. No CLI, automatic controller selection, robot motion or dynamic
+replanning is added by this API.
+
+Validation on 2026-10-17 used an owned rootless Humble container with
+`localhost/var-e9t-warehouse:humble` (image `c5df849eb3d9`), Python 3.10.12
+and pytest 6.2.5. All three warehouse packages built successfully. The full
+planning/control colcon suite passed **478 tests** (295 planning, including
+99 new 2-opt cases; 183 control), with 0 errors, failures or skips. All 379
+previous tests, including the 37 nearest-neighbor cases, passed unchanged.
+The installed API ran from `/tmp` after sourcing the installed workspace;
+the source README example also ran and both produced **16 m -> 14 m**.
+An independent Floyd-Warshall oracle exhaustively checked reversal-local
+optimality, nonworsening and idempotence for all 24 starting permutations of a
+four-request example. The validated candidate excluded the pending mission
+measurement changes. No Gazebo motion test was needed: no controller, CLI or
+robot-model behavior changed.
+
 ### Geometrically checked mission CLI
 
 Inside the Humble workspace container, build and source the installed package:
