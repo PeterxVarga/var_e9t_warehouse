@@ -633,7 +633,8 @@ ros2 run warehouse_planning mission_example --pickups r2c2 r1c4
 
 The CLI locates the installed graph and `warehouse_sim` world through
 `ament_index_python`. It loads the graph, loads the world's obstacles, checks
-every node and edge with `validate_geometry`, then calls `plan_fifo_mission`.
+every node and edge with `validate_geometry`, selects the request order, then
+calls `plan_fifo_mission` to build the complete route and depot return.
 It uses the existing conservative 0.45 m obstacle inflation and supported SDF
 geometry. The entire graph is checked even for an empty mission or an edge
 outside the selected route. Output is printed only after complete success:
@@ -658,7 +659,7 @@ the installed warehouse world. Files are never modified.
 Exit codes are 0 for success (including `--help`), 1 for loading, geometry or
 mission-planning errors, and 2 for argument syntax errors. Errors go to stderr
 without a partial plan on stdout. This CLI prints a graph plan; it does not
-send velocity commands, perform pickups or optimize the FIFO request order.
+send velocity commands or perform physical pickups. FIFO remains the default.
 On nonzero exits, Humble's `ros2 run` wrapper additionally prints its own
 `[ros2run]: Process exited with failure ...` status line to stdout; the mission
 entrypoint itself writes errors only to stderr and prints no partial plan.
@@ -673,6 +674,78 @@ timeouts; the full colcon test run had a 120 s deadline. Error cases also checke
 the installed entrypoint directly to distinguish its streams from the wrapper's
 status line. The output example above matched the installed CLI from `/tmp`.
 No Gazebo motion test was run.
+
+#### Strategy selection
+
+`--strategy {fifo,nn,nn-2opt}` selects the request ordering. Omitting it or
+selecting `fifo` preserves the previous FIFO output exactly. `nn` uses
+`nearest_neighbor_order`; `nn-2opt` improves that NN index permutation with
+`two_opt_order`. All modes validate the entire installed-world graph geometry
+before ordering, including empty missions. `--graph` retains the same checks.
+Loading, ordering or final-plan failures produce no partial plan.
+
+After building and sourcing the installed workspace, compare the strategies
+from `/tmp`:
+
+```bash
+cd /tmp
+for strategy in fifo nn nn-2opt; do
+  ros2 run warehouse_planning mission_example --strategy "$strategy" \
+    --pickups r1c2 r2c0 r2c4
+done
+```
+
+For this installed warehouse graph, original requests are `1: r1c2`,
+`2: r2c0`, `3: r2c4`. The complete graph tours, including depot return, are:
+
+| Strategy | Original request IDs in execution order | Leg lengths, including return | Total |
+|---|---|---|---|
+| `fifo` | 1, 2, 3 | 6 + 6 + 8 + 12 m | 32 m |
+| `nn` | 2, 1, 3 | 4 + 6 + 6 + 12 m | 28 m |
+| `nn-2opt` | 2, 3, 1 | 4 + 8 + 6 + 6 m | 24 m |
+
+Optimized modes add `Strategy`, `Original pickup requests` and `Execution
+order` lines. IDs are **one-based positions in the original input**, not node
+IDs or positions after sorting. Each numbered pickup leg also identifies its
+original request. For example, selected lines from `nn-2opt` are:
+
+```text
+Strategy: nn-2opt
+Original pickup requests: 1: r1c2 -> 2: r2c0 -> 3: r2c4
+Execution order: 2: r2c0 -> 3: r2c4 -> 1: r1c2
+Pickup 1 (request 2): r0c0 -> r2c0; distance: 4 m
+Pickup 2 (request 3): r2c0 -> r2c4; distance: 8 m
+Pickup 3 (request 1): r2c4 -> r1c2; distance: 6 m
+Return: r1c2 -> r0c0; distance: 6 m
+Total planned distance: 24 m
+```
+
+Repeated nodes and depot requests keep distinct original IDs and separate
+legs, including zero-length legs. An optimized empty mission shows empty
+original/execution lists, the depot node and 0 m, without invented pickup or
+return legs. Passing through another request's node is only travel.
+
+These values are **planned graph distances**, not measured robot execution
+times or physical travel distances. NN and 2-opt do not guarantee a globally
+optimal tour or improvement over FIFO; 2-opt only avoids worsening its NN
+starting tour under its distance comparison. This change prints plans only;
+the robot mission controller remains FIFO. Controller integration is separate.
+
+Validation on 2026-10-18 used an owned rootless Humble container with
+`localhost/var-e9t-warehouse:humble` (image `c5df849eb3d9`), Python 3.10.12
+and pytest 6.2.5. All three warehouse packages built successfully. The full
+planning/control suite passed **508 tests** (325 planning, 183 control), with
+0 errors, failures or skips: the previous 478 cases plus 30 strategy cases.
+The 46 installed mission CLI cases ran from temporary directories with 15 s
+subprocess timeouts and checked both `ros2 run` and the direct entrypoint on
+errors. All three strategies and the README command/output were also checked
+from `/tmp`; they produced the 32/28/24 m graph tours above. Four inputs
+(empty, original example, comparison example, repeated/depot requests) matched
+the starting commit's FIFO stdout byte for byte, both with the default and
+explicit `fifo`. Build and colcon test deadlines were 180 s and 240 s;
+the separate installed CLI check had a 90 s deadline. The tested candidate
+excluded the pending mission-validation changes. No Gazebo motion test was
+run; robot controller integration is unchanged.
 
 ## Aisle-route following
 

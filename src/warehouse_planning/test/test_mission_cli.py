@@ -1,4 +1,4 @@
-"""Exercise the installed FIFO mission CLI from temporary working directories."""
+"""Exercise installed mission CLI strategies from temporary working directories."""
 
 import json
 from pathlib import Path
@@ -140,6 +140,7 @@ def test_help_does_not_plan(cli):
     result = cli('--help')
     assert result.returncode == 0 and result.stderr == ''
     assert '--pickups' in result.stdout and '--graph' in result.stdout
+    assert '--strategy {fifo,nn,nn-2opt}' in result.stdout
     assert 'Total planned distance:' not in result.stdout
 
 
@@ -150,6 +151,148 @@ def test_help_does_not_plan(cli):
     (['--pickup', 'r2c2'], 'required: --pickups'),
 ])
 def test_argparse_errors(cli, args, message):
+    result = cli(*args)
+    assert_failure(result, 2, message)
+    assert 'usage:' in result.stderr
+
+
+@pytest.mark.parametrize('strategy,order,distances,total', [
+    ('fifo', (0, 1, 2), (6, 6, 8, 12), 32),
+    ('nn', (1, 0, 2), (4, 6, 6, 12), 28),
+    ('nn-2opt', (1, 2, 0), (4, 8, 6, 6), 24),
+])
+def test_strategy_comparison_includes_depot_return(cli, strategy, order, distances, total):
+    requests = ('r1c2', 'r2c0', 'r2c4')
+    result = cli('--strategy', strategy, '--pickups', *requests)
+    assert result.returncode == 0 and result.stderr == ''
+    lines = result.stdout.splitlines()
+    assert lines[0] == 'Frame: world'
+    if strategy == 'fifo':
+        assert not any('Strategy:' in line or 'Execution order:' in line for line in lines)
+        offset = 2
+    else:
+        assert lines[1:4] == [
+            f'Strategy: {strategy}',
+            'Original pickup requests: 1: r1c2 -> 2: r2c0 -> 3: r2c4',
+            'Execution order: ' + ' -> '.join(f'{i + 1}: {requests[i]}' for i in order),
+        ]
+        offset = 5
+    assert lines[offset - 1] == 'Pickup requests: ' + ' -> '.join(requests[i] for i in order)
+    start = 'r0c0'
+    for position, request in enumerate(order):
+        label = f'Pickup {position + 1}'
+        if strategy != 'fifo':
+            label += f' (request {request + 1})'
+        assert lines[offset + position] == (
+            f'{label}: {start} -> {requests[request]}; distance: {distances[position]} m')
+        start = requests[request]
+    assert lines[offset + 3] == f'Return: {start} -> r0c0; distance: {distances[-1]} m'
+    assert lines[-2].startswith('Nodes: r0c0 -> ') and lines[-2].endswith(' -> r0c0')
+    assert lines[-1] == f'Total planned distance: {total} m'
+
+
+@pytest.mark.parametrize('requests', [
+    (), ('r2c2', 'r1c4'), ('r1c2', 'r2c0', 'r2c4'),
+    ('r1c4', 'r0c0', 'r2c2', 'r2c2', 'r0c0'),
+])
+def test_default_and_explicit_fifo_have_identical_output(cli, requests):
+    default = cli('--pickups', *requests)
+    explicit = cli('--strategy', 'fifo', '--pickups', *requests)
+    assert default.returncode == explicit.returncode == 0
+    assert default.stderr == explicit.stderr == ''
+    assert default.stdout == explicit.stdout
+
+
+def test_fifo_preserves_repeated_and_depot_request_positions(cli):
+    result = cli('--strategy', 'fifo', '--pickups',
+                 'r1c4', 'r0c0', 'r2c2', 'r2c2', 'r0c0')
+    assert result.returncode == 0 and result.stderr == ''
+    assert result.stdout.splitlines()[:8] == [
+        'Frame: world', 'Pickup requests: r1c4 -> r0c0 -> r2c2 -> r2c2 -> r0c0',
+        'Pickup 1: r0c0 -> r1c4; distance: 10 m',
+        'Pickup 2: r1c4 -> r0c0; distance: 10 m',
+        'Pickup 3: r0c0 -> r2c2; distance: 8 m',
+        'Pickup 4: r2c2 -> r2c2; distance: 0 m',
+        'Pickup 5: r2c2 -> r0c0; distance: 8 m',
+        'Return: r0c0 -> r0c0; distance: 0 m',
+    ]
+    assert result.stdout.splitlines()[-1] == 'Total planned distance: 36 m'
+
+
+@pytest.mark.parametrize('strategy', ['nn', 'nn-2opt'])
+def test_optimized_empty_mission_has_no_invented_legs(cli, strategy):
+    result = cli('--strategy', strategy, '--pickups')
+    assert result.returncode == 0 and result.stderr == ''
+    assert result.stdout.splitlines() == [
+        'Frame: world', f'Strategy: {strategy}',
+        'Original pickup requests: (none)', 'Execution order: (none)',
+        'Pickup requests: (none)', 'Nodes: r0c0', 'Total planned distance: 0 m',
+    ]
+
+
+@pytest.mark.parametrize('strategy', ['nn', 'nn-2opt'])
+def test_optimized_repeated_and_depot_requests_keep_original_ids(cli, strategy):
+    result = cli('--pickups', 'r1c4', 'r0c0', 'r2c2', 'r2c2', 'r0c0',
+                 '--strategy', strategy)
+    assert result.returncode == 0 and result.stderr == ''
+    assert result.stdout.splitlines()[:11] == [
+        'Frame: world', f'Strategy: {strategy}',
+        'Original pickup requests: 1: r1c4 -> 2: r0c0 -> 3: r2c2 -> 4: r2c2 -> 5: r0c0',
+        'Execution order: 2: r0c0 -> 5: r0c0 -> 3: r2c2 -> 4: r2c2 -> 1: r1c4',
+        'Pickup requests: r0c0 -> r0c0 -> r2c2 -> r2c2 -> r1c4',
+        'Pickup 1 (request 2): r0c0 -> r0c0; distance: 0 m',
+        'Pickup 2 (request 5): r0c0 -> r0c0; distance: 0 m',
+        'Pickup 3 (request 3): r0c0 -> r2c2; distance: 8 m',
+        'Pickup 4 (request 4): r2c2 -> r2c2; distance: 0 m',
+        'Pickup 5 (request 1): r2c2 -> r1c4; distance: 6 m',
+        'Return: r1c4 -> r0c0; distance: 10 m',
+    ]
+    assert result.stdout.splitlines()[-1] == 'Total planned distance: 24 m'
+
+
+@pytest.mark.parametrize('strategy', ['nn', 'nn-2opt'])
+def test_optimized_unknown_pickup_has_no_partial_plan(cli, strategy):
+    assert_failure(cli('--strategy', strategy, '--pickups', 'r2c2', 'missing'), 1,
+                   'Mission planning failed: unknown pickup node in request 2: missing')
+
+
+@pytest.mark.parametrize('strategy', ['nn', 'nn-2opt'])
+def test_optimized_unreachable_pickup_has_no_partial_plan(cli, tmp_path, graph_data, strategy):
+    graph_data['edges'] = [edge for edge in graph_data['edges'] if 'r1c4' not in edge]
+    result = cli('--strategy', strategy, '--pickups', 'r2c2', 'r1c4',
+                 '--graph', write_graph(tmp_path, graph_data))
+    assert_failure(result, 1, 'is unreachable')
+    assert result.stderr.startswith('Mission planning failed:')
+
+
+@pytest.mark.parametrize('strategy', ['nn', 'nn-2opt'])
+@pytest.mark.parametrize('contents', [None, '{', '{"schema_version": 2}'])
+def test_optimized_graph_loading_errors(cli, tmp_path, strategy, contents):
+    path = tmp_path / 'invalid.json'
+    if contents is not None:
+        path.write_text(contents)
+    assert_failure(cli('--strategy', strategy, '--graph', str(path), '--pickups'), 1,
+                   'Mission planning failed:')
+
+
+@pytest.mark.parametrize('strategy', ['nn', 'nn-2opt'])
+@pytest.mark.parametrize('pickups', [[], ['r2c2', 'missing']])
+def test_optimized_geometry_checked_before_ordering_even_when_empty(
+        cli, tmp_path, graph_data, strategy, pickups):
+    graph_data['edges'].append(['r0c0', 'r3c2'])
+    result = cli('--strategy', strategy, '--graph', write_graph(tmp_path, graph_data),
+                 '--pickups', *pickups)
+    assert_failure(result, 1, 'edge r0c0--r3c2 intersects')
+    assert result.stderr.startswith('Mission planning failed:')
+
+
+@pytest.mark.parametrize('args,message', [
+    (['--pickups', '--strategy', 'bad'], 'invalid choice'),
+    (['--pickups', '--strategy', 'NN'], 'invalid choice'),
+    (['--pickups', '--strategy'], 'expected one argument'),
+    (['--strategy', 'nn'], 'required: --pickups'),
+])
+def test_strategy_argument_errors_preserve_stream_contract(cli, args, message):
     result = cli(*args)
     assert_failure(result, 2, message)
     assert 'usage:' in result.stderr
