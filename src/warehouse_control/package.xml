@@ -10,6 +10,10 @@
   <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>warehouse_planning</exec_depend>
   <exec_depend>warehouse_sim</exec_depend>

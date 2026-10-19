@@ -1,0 +1,434 @@
+{
+  "date": "2026-10-19",
+  "base_commit": "8ac5d264249c8d6b12cac3eba0348b7bb88d349b",
+  "scope": "Targeted IMU integration validation, not three-strategy/system acceptance",
+  "standalone_tests": {
+    "planning": 325,
+    "control": 234,
+    "total": 559,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0
+  },
+  "strategy_overlay_tests": {
+    "planning": 325,
+    "control": 302,
+    "total": 627,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0
+  },
+  "startup_checks": [
+    {
+      "case": "imu_first",
+      "passed": true,
+      "synthetic_sources": true,
+      "feedback_count": 90,
+      "command_count": 123,
+      "first_feedback_wall_s": 2.287141609000173,
+      "fault_seen_wall_s": null,
+      "startup_timeout_s": 10.0,
+      "sent": {
+        "wheel": 180,
+        "imu": 242,
+        "clock": 242
+      }
+    },
+    {
+      "case": "wheel_first",
+      "passed": true,
+      "synthetic_sources": true,
+      "feedback_count": 90,
+      "command_count": 124,
+      "first_feedback_wall_s": 2.2784025850014586,
+      "fault_seen_wall_s": null,
+      "startup_timeout_s": 10.0,
+      "sent": {
+        "wheel": 243,
+        "imu": 181,
+        "clock": 243
+      }
+    },
+    {
+      "case": "controller_late",
+      "passed": true,
+      "synthetic_sources": true,
+      "feedback_count": 167,
+      "command_count": 64,
+      "first_feedback_wall_s": 0.8822181359992101,
+      "fault_seen_wall_s": null,
+      "startup_timeout_s": 10.0,
+      "sent": {
+        "wheel": 250,
+        "imu": 250,
+        "clock": 250
+      }
+    },
+    {
+      "case": "missing_imu",
+      "passed": true,
+      "synthetic_sources": true,
+      "feedback_count": 0,
+      "command_count": 149,
+      "first_feedback_wall_s": null,
+      "fault_seen_wall_s": 3.8071453619995737,
+      "startup_timeout_s": 3.0,
+      "sent": {
+        "wheel": 236,
+        "imu": 66,
+        "clock": 236
+      }
+    },
+    {
+      "case": "missing_wheel",
+      "passed": true,
+      "synthetic_sources": true,
+      "feedback_count": 0,
+      "command_count": 149,
+      "first_feedback_wall_s": null,
+      "fault_seen_wall_s": 3.7568799529999524,
+      "startup_timeout_s": 3.0,
+      "sent": {
+        "wheel": 66,
+        "imu": 236,
+        "clock": 236
+      }
+    },
+    {
+      "case": "missing_clock",
+      "passed": true,
+      "synthetic_sources": true,
+      "feedback_count": 0,
+      "command_count": 150,
+      "first_feedback_wall_s": null,
+      "fault_seen_wall_s": 3.7645189310005662,
+      "startup_timeout_s": 3.0,
+      "sent": {
+        "wheel": 236,
+        "imu": 236,
+        "clock": 0
+      }
+    }
+  ],
+  "nn": {
+    "original_requests": [
+      "r1c2",
+      "r2c0",
+      "r2c4"
+    ],
+    "original_request_order": [
+      2,
+      1,
+      3
+    ],
+    "planned_distance_m": 28.0,
+    "execution_sim_seconds": 234.512,
+    "wall_seconds": 244.39712117999989,
+    "rest_seconds": 5.014,
+    "gates": {
+      "waypoint_order": true,
+      "request_order": true,
+      "separate_service": true,
+      "odom_accuracy": true,
+      "physical_accuracy": true,
+      "execution_time": true,
+      "sampled_clearance": true,
+      "stopped": true,
+      "empty_stationary": true,
+      "depot_arrival_and_rest_accuracy": true
+    },
+    "sampled_collision_count": 0,
+    "max_velocity_publishers": 1,
+    "source_aligned_pose_comparison": {
+      "case": "NN-integrated",
+      "passed": true,
+      "candidate_id": "02f5c889644bd05e00f2be957ffe6fb74c4cde8e951a7318fd9a0cba80476ddd",
+      "planned_distance_m": 28.0,
+      "execution_sim_seconds": 234.512,
+      "rest_seconds": 5.014,
+      "stops": [
+        {
+          "request": 2,
+          "node": "r2c0",
+          "start": 35.15,
+          "end": 36.2,
+          "arrival": {
+            "stamp": 35.15,
+            "physical_xy": [
+              -4.000159159216203,
+              0.9495861185011835
+            ],
+            "raw_world_xy": [
+              -4.014312182685572,
+              0.9500821984890422
+            ],
+            "estimated_world_xy": [
+              -4.00001600825239,
+              0.9500737171575255
+            ],
+            "raw_position_disagreement_m": 0.01416171489187884,
+            "estimated_position_disagreement_m": 0.0005081777721497256,
+            "raw_yaw_disagreement_rad": 0.0035616391435793204,
+            "estimated_yaw_disagreement_rad": -1.6209256159527285e-14,
+            "physical_goal_error_m": 0.05041413273510533,
+            "raw_goal_error_m": 0.051929042749819354,
+            "estimated_goal_error_m": 0.04992628540889964
+          },
+          "max_physical_goal_error_m": 0.05041413273510533,
+          "max_raw_goal_error_m": 0.051929042749819354,
+          "max_estimated_goal_error_m": 0.04992628540889964,
+          "max_raw_position_disagreement_m": 0.014167046340935942,
+          "max_estimated_position_disagreement_m": 0.0005368691419373559
+        },
+        {
+          "request": 1,
+          "node": "r1c2",
+          "start": 88.35,
+          "end": 89.35,
+          "arrival": {
+            "stamp": 88.35,
+            "physical_xy": [
+              -0.05077046161696768,
+              -0.9998656565087479
+            ],
+            "raw_world_xy": [
+              -0.03956714894025071,
+              -0.9337511387507416
+            ],
+            "estimated_world_xy": [
+              -0.04999913663459221,
+              -1.0000099603641912
+            ],
+            "raw_position_disagreement_m": 0.0670570180764551,
+            "estimated_position_disagreement_m": 0.0007847074812516537,
+            "raw_yaw_disagreement_rad": 0.016677939641639463,
+            "estimated_yaw_disagreement_rad": 1.2517114081345149e-16,
+            "physical_goal_error_m": 0.05077063935951201,
+            "raw_goal_error_m": 0.07716521814965263,
+            "estimated_goal_error_m": 0.04999913762669788
+          },
+          "max_physical_goal_error_m": 0.05077063935951201,
+          "max_raw_goal_error_m": 0.07716521814965263,
+          "max_estimated_goal_error_m": 0.04999913762669788,
+          "max_raw_position_disagreement_m": 0.0670684328109418,
+          "max_estimated_position_disagreement_m": 0.0007848482141061495
+        },
+        {
+          "request": 3,
+          "node": "r2c4",
+          "start": 137.2,
+          "end": 138.25,
+          "arrival": {
+            "stamp": 137.2,
+            "physical_xy": [
+              3.998602537844493,
+              0.9497823523056089
+            ],
+            "raw_world_xy": [
+              3.969329492785433,
+              1.083674300123164
+            ],
+            "estimated_world_xy": [
+              3.9995290820686895,
+              0.9500927627762028
+            ],
+            "raw_position_disagreement_m": 0.1370546053856222,
+            "estimated_position_disagreement_m": 0.0009771585642291405,
+            "raw_yaw_disagreement_rad": 0.020417290220241302,
+            "estimated_yaw_disagreement_rad": 0.0,
+            "physical_goal_error_m": 0.050237088295740785,
+            "raw_goal_error_m": 0.0891182838361473,
+            "estimated_goal_error_m": 0.04990945893325631
+          },
+          "max_physical_goal_error_m": 0.050237088295740785,
+          "max_raw_goal_error_m": 0.09001271867771593,
+          "max_estimated_goal_error_m": 0.04990945893325631,
+          "max_raw_position_disagreement_m": 0.13705882571928524,
+          "max_estimated_position_disagreement_m": 0.0009771915697673282
+        }
+      ],
+      "depot": {
+        "max_physical_goal_error_m": 0.049121316542551585,
+        "max_raw_goal_error_m": 0.15533257519451937,
+        "max_estimated_goal_error_m": 0.04971399437019103,
+        "max_raw_position_disagreement_m": 0.11403261753050276,
+        "max_estimated_position_disagreement_m": 0.0009044412727248979
+      },
+      "trajectory": {
+        "max_abs_raw_position_disagreement_m": 0.1602660021806463,
+        "max_abs_estimated_position_disagreement_m": 0.0011033141918472278,
+        "max_abs_raw_yaw_disagreement_rad": 0.029735306794504313,
+        "max_abs_estimated_yaw_disagreement_rad": 6.940167639180039e-05
+      },
+      "sample_gaps": {
+        "raw": 0.05000000000001137,
+        "estimated": 0.05000000000001137,
+        "physical": 0.019000000000005457
+      }
+    },
+    "imu_mean_hz": 100.0,
+    "imu_max_gap_s": 0.010000000000019327
+  },
+  "dropout_checks": [
+    {
+      "physical_samples": 747,
+      "max_physical_gap_seconds": 0.019000000000000128,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.006,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "stopped": true,
+      "final_physical_pose": [
+        -3.9809247520034634,
+        -2.7429732530955384,
+        1.6429761491615427
+      ],
+      "final_odom_pose": [
+        0.018092263653906204,
+        0.25753562778508043,
+        1.646512384974755
+      ],
+      "final_command": [
+        12.849,
+        15.421552113000871,
+        0.0,
+        0.0
+      ],
+      "case": "loss-wheel-travel",
+      "passed": true,
+      "loss_sim": 5.868,
+      "controller_fault_sim": 6.864,
+      "last_estimator_feedback_stamp": 5.85,
+      "estimator_outputs_after_loss_before_injection": 0,
+      "source_feedback_recovered": true,
+      "controller_feedback_injected_samples": 112,
+      "estimator_latched": true,
+      "controller_latched": true,
+      "restoration_model": "Fresh raw-wheel feedback injected only after FAULT; estimator remains latched. No world pose used."
+    },
+    {
+      "physical_samples": 2495,
+      "max_physical_gap_seconds": 0.018000000000000682,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.005,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "stopped": true,
+      "final_physical_pose": [
+        -4.000160724137335,
+        0.9515578139033415,
+        1.5704673207736375
+      ],
+      "final_odom_pose": [
+        -0.014620554685495574,
+        3.9520660004047636,
+        1.5741064197616594
+      ],
+      "final_command": [
+        42.375,
+        45.272154562999276,
+        0.0,
+        0.0
+      ],
+      "case": "loss-wheel-service",
+      "passed": true,
+      "loss_sim": 35.376,
+      "controller_fault_sim": 36.372,
+      "last_estimator_feedback_stamp": 35.35,
+      "estimator_outputs_after_loss_before_injection": 0,
+      "source_feedback_recovered": true,
+      "controller_feedback_injected_samples": 111,
+      "estimator_latched": true,
+      "controller_latched": true,
+      "restoration_model": "Fresh raw-wheel feedback injected only after FAULT; estimator remains latched. No world pose used."
+    },
+    {
+      "physical_samples": 888,
+      "max_physical_gap_seconds": 0.019000000000000128,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.0040000000000004,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "stopped": true,
+      "final_physical_pose": [
+        -3.980778423100637,
+        -2.7459903322957047,
+        1.649875513999264
+      ],
+      "final_odom_pose": [
+        0.01819455055603199,
+        0.2545568301258541,
+        1.6536474990344698
+      ],
+      "final_command": [
+        15.073,
+        18.014262177001,
+        0.0,
+        0.0
+      ],
+      "case": "loss-imu-travel",
+      "passed": true,
+      "loss_sim": 8.092,
+      "controller_fault_sim": 9.074,
+      "last_estimator_feedback_stamp": 8.05,
+      "estimator_outputs_after_loss_before_injection": 0,
+      "source_feedback_recovered": true,
+      "controller_feedback_injected_samples": 111,
+      "estimator_latched": true,
+      "controller_latched": true,
+      "restoration_model": "Fresh raw-wheel feedback injected only after FAULT; estimator remains latched. No world pose used."
+    },
+    {
+      "physical_samples": 2697,
+      "max_physical_gap_seconds": 0.019000000000000128,
+      "sampled_collision_count": 0,
+      "rest_seconds": 5.016,
+      "rest_displacement_m": 0.0,
+      "rest_speed_m_s": 0.0,
+      "rest_yaw_rad": 0.0,
+      "stopped": true,
+      "final_physical_pose": [
+        -4.000178199814694,
+        0.9505141203317895,
+        1.57044961327503
+      ],
+      "final_odom_pose": [
+        -0.015471815562351117,
+        3.951061767926588,
+        1.5742991673708777
+      ],
+      "final_command": [
+        44.533,
+        48.953274931000124,
+        0.0,
+        0.0
+      ],
+      "case": "loss-imu-service",
+      "passed": true,
+      "loss_sim": 37.52,
+      "controller_fault_sim": 38.519,
+      "last_estimator_feedback_stamp": 37.5,
+      "estimator_outputs_after_loss_before_injection": 0,
+      "source_feedback_recovered": true,
+      "controller_feedback_injected_samples": 110,
+      "estimator_latched": true,
+      "controller_latched": true,
+      "restoration_model": "Fresh raw-wheel feedback injected only after FAULT; estimator remains latched. No world pose used."
+    }
+  ],
+  "evidence_result_sha256": {
+    "evidence/NN-integrated/result.json": "3b5602b12db40a4e4c31538a03c7ed33453ca1969fac3df3d76c39860e1ca3ee",
+    "evidence/pose-comparisons.json": "3a3f4e6dfd579ba4c66d3b99d8fb456831807710737919964f5459802d75476c",
+    "evidence/startup/results.json": "58a2f49833bd2e779278bb598404ae5949fcd5a286e6b903fdf3b0a6247a0faa",
+    "evidence/loss-imu-service/result.json": "cf6d93f1de04a782e80aad96f0552def3c2c7b24249af1b0d3260cd4687964c8",
+    "evidence/loss-imu-travel/result.json": "da509fe20605aedf7350e0cb90a168cd7839df13c400d1975fe04654df58d96e",
+    "evidence/loss-wheel-service/result.json": "3187f61902386e5ce96eb2b90800e6564c8eaaf6bff84b59c27ccccfeabefb3f",
+    "evidence/loss-wheel-travel/result.json": "d67d38be7b80d61bc371c663075948135fa778adde19776a070dd667606a5ccd",
+    "evidence/results.log": "6c53a0943392bab04934e069219312a63a8c6abc9cf389fa1fca8cab5f58ed4d",
+    "evidence/overlay-results.log": "816d12a0ba226b6db6108ace44cbec225228c9914b41a1d9604ae9f954ef9b61"
+  },
+  "prototype_archive_sha256": "9129003f15563be638850ab241bd5b6f4122363cf292b4703dc912ba4a4f3308"
+}

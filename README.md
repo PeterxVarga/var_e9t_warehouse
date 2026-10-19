@@ -90,8 +90,8 @@ ros2 launch warehouse_sim simulation.launch.py headless:=true
 ```
 
 The launch loads local models from the installed package and starts Gazebo
-with three directional ROS bridges. It also works outside the repository
-directory after sourcing the workspace. Ctrl+C stops the launched simulation
+with four directional ROS bridges, including the IMU channel. It also works
+outside the repository directory after sourcing the workspace. Ctrl+C stops the launched simulation
 and bridge. A fresh launch restores the initial robot pose.
 
 ### Graphical mode on Fedora KDE
@@ -146,6 +146,7 @@ source /workspace/install/setup.bash
 |---|---|---|---|
 | `/warehouse/cmd_vel` | `geometry_msgs/msg/Twist` | ROS → Gazebo | linear.x in m/s; angular.z in rad/s |
 | `/warehouse/odom` | `nav_msgs/msg/Odometry` | Gazebo → ROS | Position in m, quaternion orientation, velocity in m/s and rad/s |
+| `/warehouse/imu` | `sensor_msgs/msg/Imu` | Gazebo → ROS | Ideal simulated sensor attitude, angular velocity and acceleration; 100 Hz |
 | `/clock` | `rosgraph_msgs/msg/Clock` | Gazebo → ROS | Simulation time from `/world/warehouse/clock` |
 
 Odometry is published at 20 Hz in simulation time, with parent frame `odom`
@@ -933,3 +934,64 @@ Fortress/DART model and installed warehouse geometry. Static graph validation
 does not prove continuous collision safety or hardware accuracy. There is no
 mechanical loading, localization correction, optimized request order,
 replanning, dynamic obstacle avoidance or independent drive watchdog. A crash, SIGKILL or broken command bridge can prevent delivery of zero.
+
+## IMU heading odometry (simulation)
+
+An opt-in estimator reintegrates wheel displacement increments using the
+simulated IMU heading. It does not replace yaw beside accumulated wheel XY.
+The default controllers still consume raw `/warehouse/odom`; the new
+`/warehouse/imu_odom` topic must be selected explicitly. Raw wheel odometry
+remains available. Dynamic Gazebo world poses are verification data only.
+
+Build all dependencies, source the workspace, and start a fresh simulation:
+
+```bash
+colcon build --packages-up-to warehouse_control
+source install/setup.bash
+ros2 launch warehouse_sim simulation.launch.py headless:=true
+```
+
+In another sourced shell, start the estimator:
+
+```bash
+ros2 launch warehouse_control heading_odometry.launch.py startup_timeout:=10.0
+```
+
+In a third sourced shell, run just one controller, selecting the new feedback:
+
+```bash
+ros2 run warehouse_control mission_controller --ros-args \
+  -p use_sim_time:=true -p "pickup_nodes:=['r2c0','r1c2','r2c4']" \
+  -r /warehouse/odom:=/warehouse/imu_odom
+```
+
+This standalone example is FIFO with an explicitly ordered list; controller
+strategy selection is a separate change. Do not run another velocity publisher.
+The estimator, simulation and controller may start in either order: controllers
+publish only zero until feedback exists. `WAITING_FOR_SENSORS` requires an
+advancing clock and at least two fresh, advancing samples from **each** channel,
+with source-time IMU brackets for the wheel sample. Old startup backlog does not
+establish readiness. The read-only DOUBLE `startup_timeout` defaults to **10 wall
+seconds from estimator construction**, including paused or absent simulation.
+Expiry latches estimator `FAULT` without publishing feedback; restart the
+estimator and controller in a fresh simulation after correcting the cause.
+
+After `ACTIVE`, either missing/stale/invalid channel or backwards time latches
+`FAULT` and suppresses feedback. Repeated stamps do not refresh it. The existing
+controller's feedback timeout then stops motion and latches its own `FAULT`;
+returning data cannot restart either node. This does not protect against a
+controller crash, SIGKILL or broken command bridge; there is no drive watchdog.
+
+Output pose is a planar estimate in `odom`, child
+`warehouse_robot/base_link`, with the original wheel source timestamp. Twist
+and twist covariance are copied **raw wheel data**, not fused estimates.
+Estimated pose covariance is unavailable: its all-zero ROS array is only a
+structural placeholder, **not zero uncertainty**. Do not feed that covariance
+to a probabilistic estimator. No uncertainty model or TF publisher is supplied.
+
+The Fortress sensor provides **ideal, noise-free, world-referenced orientation**
+with a known mount; it does not demonstrate drift-free yaw from a real IMU.
+Wheel slip/distance errors remain unobserved. Physical wheel separation stays
+0.38 m and the calibrated effective DiffDrive track stays 0.363 m. The 0.15 m
+physical acceptance limit is unchanged. See [integration checks and limitations](docs/imu-odometry-integration.md);
+the full three-strategy physical acceptance campaign remains a separate step.
