@@ -1,11 +1,13 @@
-"""ROS-free preparation and ordered execution of validated FIFO missions."""
+"""ROS-free preparation and execution of validated, ordered pickup missions."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from math import hypot
 
 from warehouse_control.control import goal_command
 from warehouse_control.route import RouteProgress, _finite, load_spawn, validate_start
 from warehouse_planning.mission import plan_fifo_mission
+from warehouse_planning.ordering import nearest_neighbor_order, two_opt_order
 from warehouse_planning.roadmap import load_graph, load_obstacles, validate_geometry
 
 
@@ -22,9 +24,10 @@ class MissionEvent:
     node: str
     feedback_stamp: int
     clock_stamp: int
+    request_index: int | None = None
 
 
-def prepare_mission(graph_path, sdf_path, pickup_nodes):
+def prepare_mission(graph_path, sdf_path, pickup_nodes, strategy='fifo'):
     """Validate the entire installed world/graph and plan before any motion."""
     graph = load_graph(graph_path)
     validate_geometry(graph, load_obstacles(sdf_path))
@@ -32,10 +35,22 @@ def prepare_mission(graph_path, sdf_path, pickup_nodes):
     if hypot(graph.nodes[graph.depot][0] - transform.x,
              graph.nodes[graph.depot][1] - transform.y) > 1e-9:
         raise ValueError('graph depot does not match the SDF robot spawn')
-    plan = plan_fifo_mission(graph, pickup_nodes)
+    if not isinstance(strategy, str) or strategy not in ('fifo', 'nn', 'nn-2opt'):
+        raise ValueError('strategy must be one of fifo, nn, nn-2opt')
+    if (not isinstance(pickup_nodes, Sequence)
+            or isinstance(pickup_nodes, (str, bytes, bytearray))):
+        raise ValueError('pickup_nodes must be an ordered sequence of node identifiers')
+    requests = tuple(pickup_nodes)
+    order = tuple(range(len(requests)))
+    if strategy != 'fifo':
+        order = nearest_neighbor_order(graph, requests)
+        if strategy == 'nn-2opt':
+            order = two_opt_order(graph, requests, order)
+    plan = plan_fifo_mission(graph, [requests[i] for i in order])
     points = tuple(tuple(transform.world_to_odom(graph.nodes[node]) for node in leg.nodes)
                    for leg in plan.legs)
-    return MissionProgress(plan, points), transform
+    return MissionProgress(plan, points, original_requests=requests,
+                           request_order=order, strategy=strategy), transform
 
 
 class MissionProgress:
@@ -46,8 +61,23 @@ class MissionProgress:
     Plan and point data are immutable snapshots; world poses are never inputs.
     """
 
-    def __init__(self, plan, leg_points):
+    def __init__(self, plan, leg_points, *, original_requests=None,
+                 request_order=None, strategy='fifo'):
         self.plan = plan
+        self._original_requests = tuple(plan.pickup_nodes if original_requests is None
+                                        else original_requests)
+        self._request_order = tuple(range(len(plan.pickup_nodes)) if request_order is None
+                                    else request_order)
+        count = len(self._original_requests)
+        if (len(self._request_order) != count
+                or any(type(i) is not int for i in self._request_order)
+                or set(self._request_order) != set(range(count))):
+            raise ValueError('request_order must be a permutation of original request indices')
+        if tuple(self._original_requests[i] for i in self._request_order) != plan.pickup_nodes:
+            raise ValueError('request_order must map original requests to the planned pickups')
+        if not isinstance(strategy, str) or strategy not in ('fifo', 'nn', 'nn-2opt'):
+            raise ValueError('strategy must be one of fifo, nn, nn-2opt')
+        self._strategy = strategy
         self._points = tuple(tuple(_finite(p, 2, 'waypoint') for p in leg)
                              for leg in leg_points)
         if len(self._points) != len(plan.legs):
@@ -62,6 +92,22 @@ class MissionProgress:
         self.events = ()
         self.last_stamp = self.last_clock = self.service_start = None
         self.last_command = (0.0, 0.0, False)
+
+    @property
+    def original_requests(self):
+        return self._original_requests
+
+    @property
+    def request_order(self):
+        return self._request_order
+
+    @property
+    def strategy(self):
+        return self._strategy
+
+    def request_index(self, leg):
+        """Original zero-based request identity; the return leg has no request."""
+        return self._request_order[leg] if leg < len(self._request_order) else None
 
     @property
     def route(self):
@@ -89,7 +135,7 @@ class MissionProgress:
         self.events += (MissionEvent(kind, self.leg_index,
                                      route.index if route else 0,
                                      route.nodes[route.index] if route else self.plan.nodes[0],
-                                     stamp, now),)
+                                     stamp, now, self.request_index(self.leg_index)),)
 
     def command(self, pose, config, feedback_stamp, clock_stamp):
         self.events = ()
@@ -147,7 +193,8 @@ class MissionProgress:
         if route.index != index or command[2]:
             # RouteProgress advances before returning; log the point just met.
             self.events += (MissionEvent('waypoint', self.leg_index, index,
-                                         route.nodes[index], stamp, now),)
+                                         route.nodes[index], stamp, now,
+                                         self.request_index(self.leg_index)),)
         if not command[2]:
             return command
         if self.leg_index < len(self.plan.pickup_nodes):

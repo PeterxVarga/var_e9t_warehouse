@@ -1,9 +1,10 @@
-"""Execute a startup-configured FIFO mission using wheel odometry only."""
+"""Execute a startup-configured ordered mission using configured odometry feedback."""
 
 from pathlib import Path
 
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
+from rclpy.exceptions import InvalidParameterTypeException
 from rclpy.parameter import Parameter
 
 from warehouse_control.goal_controller import GoalController, run_controller
@@ -15,6 +16,14 @@ class MissionController(GoalController):
         super().__init__('mission_controller')
 
     def goal_parameters(self):
+        try:
+            strategy = self.declare_parameter(
+                'strategy', 'fifo', ParameterDescriptor(read_only=True))
+        except InvalidParameterTypeException as exc:
+            raise ValueError('strategy must be a STRING: fifo, nn, nn-2opt') from exc
+        if (strategy.type_ != Parameter.Type.STRING
+                or strategy.value not in ('fifo', 'nn', 'nn-2opt')):
+            raise ValueError('strategy must be a STRING: fifo, nn, nn-2opt')
         # Humble's YAML parser represents an explicit [] override as NOT_SET;
         # Python list inference instead produces BYTE_ARRAY. Public parameter
         # getters cannot distinguish absent and explicit NOT_SET overrides.
@@ -49,8 +58,20 @@ class MissionController(GoalController):
         except PackageNotFoundError as exc:
             raise ValueError(f'installed warehouse package missing: {exc}') from exc
         self.mission, self.transform = prepare_mission(
-            graph, world, self.get_parameter('pickup_nodes').value)
+            graph, world, self.get_parameter('pickup_nodes').value,
+            self.get_parameter('strategy').value)
         self.target_description = 'FIFO mission from the depot in a fresh simulation'
+        if self.mission.strategy != 'fifo':
+            self.target_description = f'{self.mission.strategy} mission from the depot in a fresh simulation'
+            execution = tuple((i + 1, self.mission.original_requests[i])
+                              for i in self.mission.request_order)
+            self.get_logger().info(
+                f'Mission strategy: {self.mission.strategy}; '
+                f'original pickup requests: {self.mission.original_requests}; '
+                f'execution order: {execution}; '
+                f'planned length={self.mission.plan.total_distance_m:g} m; '
+                f'static world-to-odom spawn={self.transform}; simulated service=1 s per request')
+            return
         self.get_logger().info(
             f'FIFO pickup requests: {self.mission.plan.pickup_nodes}; '
             f'planned length={self.mission.plan.total_distance_m:g} m; '
@@ -66,13 +87,13 @@ class MissionController(GoalController):
                 message = (f'Mission waypoint leg {event.leg + 1} '
                            f'{event.waypoint + 1}/{total} {event.node} reached in odom')
             elif event.kind == 'arrival':
-                message = f'Pickup request {event.leg + 1} {event.node} arrived; simulated service started'
+                message = f'Pickup request {event.request_index + 1} {event.node} arrived; simulated service started'
             elif event.kind == 'serviced':
-                message = f'Pickup request {event.leg + 1} {event.node} simulated service completed'
+                message = f'Pickup request {event.request_index + 1} {event.node} simulated service completed'
             elif event.kind == 'depot':
                 message = f'Final depot {event.node} reached in odom'
             else:
-                message = f'Pickup request {event.leg + 1} {event.node} {event.kind}'
+                message = f'Pickup request {event.request_index + 1} {event.node} {event.kind}'
             self.get_logger().info(f'{message}; {timing}')
         return command
 

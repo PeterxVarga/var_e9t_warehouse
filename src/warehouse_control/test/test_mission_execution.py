@@ -212,3 +212,129 @@ def test_depot_spawn_mismatch(tmp_path):
         'text', '-4.1 -3 0 0 0 0'))
     with pytest.raises(ValueError, match='depot does not match'):
         prepare_mission(GRAPH, world, ['r2c2'])
+
+
+@pytest.mark.parametrize('strategy,order,lengths,total', [
+    ('fifo', (0, 1, 2), (6, 6, 8, 12), 32),
+    ('nn', (1, 0, 2), (4, 6, 6, 12), 28),
+    ('nn-2opt', (1, 2, 0), (4, 8, 6, 6), 24),
+])
+def test_prepared_strategies_and_complete_identity_aware_execution(strategy, order, lengths, total):
+    requests = ['r1c2', 'r2c0', 'r2c4']
+    mission, _ = prepare_mission(GRAPH, SDF, requests, strategy)
+    assert mission.strategy == strategy
+    assert mission.original_requests == tuple(requests)
+    assert mission.request_order == order
+    assert mission.plan.pickup_nodes == tuple(requests[i] for i in order)
+    assert tuple(leg.distance_m for leg in mission.plan.legs) == lengths
+    assert mission.plan.total_distance_m == total
+    requests.clear()
+    with pytest.raises(AttributeError):
+        mission.request_order = ()
+    with pytest.raises(TypeError):
+        mission.request_order[0] = 1
+    t, events = 1000000000, []
+    for leg in range(4):
+        for point in mission.route.points:
+            step(mission, point, t)
+            events.extend(mission.events)
+            t += 50000000
+        if leg < 3:
+            for _ in range(20):
+                step(mission, point, t)
+                events.extend(mission.events)
+                t += 50000000
+            assert mission.completed_requests == leg + 1 and mission.state != 'REACHED'
+    assert mission.state == 'REACHED'
+    assert [e.request_index for e in events if e.kind == 'arrival'] == list(order)
+    assert [e.request_index for e in events if e.kind == 'serviced'] == list(order)
+    assert all(e.request_index is None for e in events if e.leg == 3)
+    assert events[-1].kind == 'depot' and events[-1].request_index is None
+    assert step(mission, (99, 99), 0) == (0, 0, True)
+
+
+@pytest.mark.parametrize('strategy', ['fifo', 'nn', 'nn-2opt'])
+def test_strategy_empty_and_duplicate_depot_identities(strategy):
+    empty, _ = prepare_mission(GRAPH, SDF, [], strategy)
+    assert empty.request_order == empty.original_requests == ()
+    assert step(empty, (0, 0), 1000000000) == (0, 0, True)
+    assert empty.events[0].request_index is None
+    requests = ['r1c4', 'r0c0', 'r2c2', 'r2c2', 'r0c0']
+    mission, _ = prepare_mission(GRAPH, SDF, requests, strategy)
+    assert mission.original_requests == tuple(requests)
+    assert mission.request_order == ((0, 1, 2, 3, 4) if strategy == 'fifo' else (1, 4, 2, 3, 0))
+    assert len(mission.plan.legs) == 6
+    assert mission.request_index(5) is None
+
+
+@pytest.mark.parametrize('strategy', [None, True, 1, [], '', 'NN', 'unknown'])
+def test_invalid_strategy(strategy):
+    with pytest.raises(ValueError, match='strategy'):
+        prepare_mission(GRAPH, SDF, [], strategy)
+
+
+@pytest.mark.parametrize('strategy', ['fifo', 'nn', 'nn-2opt'])
+def test_geometry_spawn_and_unreachable_validation_for_all_strategies(tmp_path, strategy):
+    data = json.loads(GRAPH.read_text())
+    data['edges'].append(['r0c0', 'r3c2'])
+    graph = tmp_path / 'graph.json'
+    graph.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match='intersects'):
+        prepare_mission(graph, SDF, [], strategy)
+    world = changed_world(tmp_path, lambda w: w.find('include/pose').__setattr__(
+        'text', '-4.1 -3 0 0 0 0'))
+    with pytest.raises(ValueError, match='depot does not match'):
+        prepare_mission(GRAPH, world, [], strategy)
+    data['edges'] = [edge for edge in json.loads(GRAPH.read_text())['edges'] if 'r1c4' not in edge]
+    graph.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match='unreachable'):
+        prepare_mission(graph, SDF, ['r2c2', 'r1c4'], strategy)
+    with pytest.raises(ValueError, match='unknown pickup'):
+        prepare_mission(GRAPH, SDF, ['missing'], strategy)
+
+
+@pytest.mark.parametrize('order', [(0, 0), (0,), (0, 2), (False, 1), (0, 1.0)])
+def test_invalid_request_identity_permutation(line, order):
+    plan = plan_fifo_mission(line, ['near', 'far'])
+    with pytest.raises(ValueError, match='permutation'):
+        MissionProgress(plan, [tuple(line.nodes[n] for n in leg.nodes) for leg in plan.legs],
+                        request_order=order)
+
+
+def test_mapping_snapshot_and_plan_alignment(line):
+    plan = plan_fifo_mission(line, ['near', 'far'])
+    requests, order = ['far', 'near'], [1, 0]
+    points = [tuple(line.nodes[n] for n in leg.nodes) for leg in plan.legs]
+    mission = MissionProgress(plan, points, original_requests=requests, request_order=order, strategy='nn')
+    requests.clear()
+    order.clear()
+    assert mission.original_requests == ('far', 'near') and mission.request_order == (1, 0)
+    with pytest.raises(ValueError, match='map original'):
+        MissionProgress(plan, points, original_requests=['far', 'near'])
+
+
+@pytest.mark.parametrize('strategy', ['nn', 'nn-2opt'])
+def test_identity_mapping_does_not_change_commands_for_the_same_ordered_plan(strategy):
+    optimized, _ = prepare_mission(GRAPH, SDF, ['r1c2', 'r2c0', 'r2c4'], strategy)
+    fifo, _ = prepare_mission(GRAPH, SDF, optimized.plan.pickup_nodes)
+    assert optimized.plan == fifo.plan and optimized.points == fifo.points
+    t, moving_comparisons = 1000000000, 0
+    for leg, points in enumerate(optimized.points):
+        for index, point in enumerate(points):
+            if index and point != points[index - 1]:
+                previous = points[index - 1]
+                between = tuple((a + b) / 2 for a, b in zip(previous, point))
+                command = step(optimized, between, t)
+                assert command == step(fifo, between, t)
+                assert command[:2] != (0, 0) and not command[2]
+                moving_comparisons += 1
+                t += 50000000
+            assert step(optimized, point, t) == step(fifo, point, t)
+            assert optimized.state == fifo.state
+            t += 50000000
+        if leg < 3:
+            for _ in range(20):
+                assert step(optimized, point, t) == step(fifo, point, t)
+                assert optimized.state == fifo.state
+                t += 50000000
+    assert moving_comparisons > 0 and optimized.state == fifo.state == 'REACHED'

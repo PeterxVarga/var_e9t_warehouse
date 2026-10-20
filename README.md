@@ -17,7 +17,7 @@ The robot completes pickup jobs on a known aisle network and returns to the depo
 
 ## Status
 
-The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning is available as a Python API and a geometrically checked CLI. A separate mission controller executes FIFO requests with simulated service stops and depot return. Optimized pickup sequencing, replanning, and comparative experiments remain under development.
+The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning is available as a Python API and a geometrically checked CLI. A separate mission controller executes FIFO requests with simulated service stops and depot return. Mission execution supports startup FIFO, NN and NN+2-opt selection. Replanning remains under development.
 
 ## Development environment
 
@@ -729,8 +729,8 @@ return legs. Passing through another request's node is only travel.
 These values are **planned graph distances**, not measured robot execution
 times or physical travel distances. NN and 2-opt do not guarantee a globally
 optimal tour or improvement over FIFO; 2-opt only avoids worsening its NN
-starting tour under its distance comparison. This change prints plans only;
-the robot mission controller remains FIFO. Controller integration is separate.
+starting tour under its distance comparison. This CLI prints plans only;
+robot execution uses the separately configured mission controller described below.
 
 Validation on 2026-10-18 used an owned rootless Humble container with
 `localhost/var-e9t-warehouse:humble` (image `c5df849eb3d9`), Python 3.10.12
@@ -879,9 +879,9 @@ independent drive watchdog, dynamic obstacle detection, or replanning;
 SIGKILL, a crash, or command-bridge loss can prevent a stop command reaching
 the robot.
 
-## FIFO mission execution
+## Mission execution (FIFO by default)
 
-`warehouse_control/mission_controller` executes a complete FIFO graph plan,
+`warehouse_control/mission_controller` executes a complete ordered graph plan (FIFO by default),
 including the depot return, with one velocity publisher. It loads the installed
 graph and world, validates the entire obstacle geometry and depot/SDF spawn
 agreement, and plans all legs before creating the command publisher. Invalid
@@ -932,8 +932,141 @@ ROS-clock timestamps. Ctrl+C and direct SIGTERM send a final zero command.
 Execution relies on wheel odometry and the known spawn in the current
 Fortress/DART model and installed warehouse geometry. Static graph validation
 does not prove continuous collision safety or hardware accuracy. There is no
-mechanical loading, localization correction, optimized request order,
+mechanical loading, localization correction,
 replanning, dynamic obstacle avoidance or independent drive watchdog. A crash, SIGKILL or broken command bridge can prevent delivery of zero.
+
+### Controller strategy selection
+
+The startup-only, read-only **STRING** parameter `strategy` accepts `fifo`
+(default), `nn`, or `nn-2opt`. Missing `pickup_nodes` is still an error;
+selecting a strategy never supplies example requests. After launching a fresh
+simulation and the installed estimator in separate sourced shells:
+
+```bash
+ros2 launch warehouse_control heading_odometry.launch.py
+```
+
+Run one controller in another sourced shell, explicitly selecting IMU feedback:
+
+```bash
+ros2 run warehouse_control mission_controller --ros-args \
+  -p use_sim_time:=true -p strategy:=nn-2opt \
+  -p "pickup_nodes:=['r1c2','r2c0','r2c4']" \
+  -r /warehouse/odom:=/warehouse/imu_odom
+```
+
+Strategy selection does not change the default feedback topic. Omitting the
+remap retains raw wheel odometry; the repeated physical campaign below used
+the explicit remap. Live Gazebo world poses are independent verification data,
+never controller or estimator feedback.
+
+All modes validate the entire installed graph against the installed world and
+verify depot/spawn agreement before ordering, preparing every leg or creating
+the velocity-command publisher. NN calls `nearest_neighbor_order`; NN+2-opt
+passes that NN index permutation to `two_opt_order`. `plan_fifo_mission` builds
+the complete reordered plan and depot return. Bad parameter types, unsupported
+strategies, invalid geometry and planning errors fail before command publication.
+There is no direct-motion fallback.
+
+`pickup_nodes` retains the original input order. The ROS-free
+`prepare_mission(..., strategy='fifo')` remains compatible with existing calls;
+`MissionProgress(plan, leg_points)` also defaults to FIFO identity mapping.
+Progress keeps immutable `original_requests` and a separate zero-based
+`request_order` tuple. Arrival/service events carry the original `request_index`;
+the return leg and final depot event have no pickup request identity.
+Optimized startup logs show the strategy, original requests and execution order
+as `(one-based original request ID, node)` pairs. Arrival and service logs use
+those original IDs, while waypoint leg numbers remain execution-leg ordinals.
+Default/explicit FIFO retain the existing log format and numbering.
+
+Duplicate nodes and depot requests keep separate identities, legs and one-second
+simulated services; passing another request's node is only travel. Empty missions
+validate geometry and the fresh start, then remain stationary. Ordering does not
+change the continuous-tolerance service wait, feedback/time checks, terminal
+FAULT/REACHED latches or SIGINT/SIGTERM shutdown. NN/2-opt retain their heuristic
+limits and do not guarantee a globally shortest tour or improvement over FIFO.
+
+### Controller strategy validation — 2026-10-20
+
+**The frozen candidate passed the requested simulation campaign with explicit IMU feedback.**
+
+An owned rootless container used `localhost/var-e9t-warehouse:humble`
+(image `c5df849eb3d9`), ROS Humble, Python 3.10.12 and pytest 6.2.5.
+All three warehouse packages built and were included in colcon test discovery:
+**627 tests passed** (325 planning, 302 control), with zero errors, failures or
+skips; `warehouse_sim` registers no tests. Installed entrypoints ran from `/tmp`,
+including default FIFO, typed/read-only parameters, explicit empty arrays,
+invalid startup arguments and shutdown. Installed Python sources, launch,
+world, model, bridge configuration and graph matched the frozen source copy.
+Build/test deadlines were 180/240 wall seconds.
+
+Each row below is a fresh headless Fortress/DART simulation, using installed
+launch files and controller with explicit `/warehouse/odom:=/warehouse/imu_odom`
+remapping. Original requests were `['r1c2','r2c0','r2c4']`: FIFO served original
+IDs **1,2,3**, NN **2,1,3**, and NN+2-opt **2,3,1**. Planned graph lengths were
+32, 28 and 24 m respectively; they are not physical travel distances.
+Before the campaign, the reserved control mission was fixed as
+`['r2c2','r0c0','r2c2']`, strategy **nn-2opt**, without tuning. It served IDs
+**2,1,3**, retaining separate depot and repeated-node services (16 m planned).
+
+| Run | Mission time (sim s) | Max estimated target error (m) | Max physical service error (m) | Max physical depot error (m) | Final rest (sim s) | Gates |
+|---|---:|---:|---:|---:|---:|---|
+| fifo 1 | 267.367 | 0.049437 | 0.050168 | 0.049058 | 5.955 | Pass |
+| fifo 2 | 265.090 | 0.049802 | 0.050513 | 0.049704 | 5.968 | Pass |
+| fifo 3 | 264.805 | 0.049802 | 0.050790 | 0.049503 | 5.707 | Pass |
+| nn 1 | 234.541 | 0.049994 | 0.050311 | 0.049403 | 5.975 | Pass |
+| nn 2 | 237.472 | 0.049536 | 0.050038 | 0.048436 | 5.947 | Pass |
+| nn 3 | 234.701 | 0.049582 | 0.049917 | 0.048562 | 5.785 | Pass |
+| nn-2opt 1 | 199.987 | 0.049771 | 0.050407 | 0.049365 | 5.797 | Pass |
+| nn-2opt 2 | 197.763 | 0.049156 | 0.049559 | 0.049592 | 5.828 | Pass |
+| nn-2opt 3 | 197.582 | 0.049999 | 0.050428 | 0.050526 | 5.847 | Pass |
+| Control | 136.540 | 0.049662 | 0.049541 | 0.049622 | 5.573 | Pass |
+
+Accuracy maxima include the complete continuous service intervals and depot
+arrival through braking and final rest. Endpoints use bracketed source-time
+interpolation, with finite, increasing streams and gaps at most 0.1 s.
+An independent offline audit also checked raw controller logs against the exact
+waypoint/original-request order, separate continuous >=1 s zero-command services,
+final depot, estimated errors <=0.05 m, physical errors <=0.15 m, 360 simulation-
+second / 600 wall-second deadlines, and >=5 simulation seconds of physical rest.
+Sampled obstacle checks use the unchanged 0.3202 m footprint radius; rest bounds
+remain 0.001 m, 0.001 m/s and 0.001 rad. There was one velocity publisher.
+
+Fresh targeted regressions passed **18/18** cases: wheel and IMU loss, each
+during travel and service, plus actual terminal Ctrl+C and direct node SIGTERM,
+for every strategy. Loss probes kept command/clock transport alive using separate
+sensor bridge processes. After source recovery the estimator stayed latched
+and emitted no new feedback. A separately recorded advancing raw-wheel feedback
+injection after both FAULT latches tested the controller's independent latch:
+no movement or service completion resumed. These injected samples are not
+estimator output and contain no Gazebo world-pose data. Shutdown cases verified
+exit code zero, final zero commands and physical rest.
+
+One earlier NN+2-opt wheel-loss travel attempt was **aborted before controller
+startup** by an immediate ACTIVE-log assertion: feedback beat asynchronous
+launch log forwarding. Its failed result is preserved. The isolated adapter
+was corrected to wait for the log, and only that probe was freshly repeated;
+no candidate source or acceptance bound changed. The 18 completed probes above
+include this fresh retry, not a relabeling of the aborted attempt.
+Post-measurement harness cleanup sent SIGINT to launch process groups and
+produced estimator child exits -2, sometimes with KeyboardInterrupt/pybind
+tracebacks. Estimator cleanup is not claimed as a clean shutdown; the targeted
+Ctrl+C/SIGTERM results concern the mission controller. Those original logs are
+preserved as a separate integration limitation.
+
+No gains, model geometry, calibrated effective track or physical limit changed.
+The historical raw-wheel NN failure remains a failure; this campaign establishes
+only the explicitly remapped IMU configuration. Ideal noise-free simulated
+attitude, remaining wheel-distance/slip errors, unavailable pose covariance,
+sampled obstacle checks and absence of a drive watchdog limit these results;
+they do not establish hardware accuracy or continuous collision safety.
+
+Raw streams, unmodified logs, process invocations, per-run results, independent
+audits, source hashes, build/test XML, reserved-mission declaration and exact
+isolated harness copies are preserved locally under ignored
+`log/mission-strategy-acceptance-20261020/`. The old waiting mission-validation
+and diagnosis files were excluded from the candidate workspace and patch.
+No historical measurement was reused as fresh acceptance evidence.
 
 ## IMU heading odometry (simulation)
 
@@ -965,8 +1098,8 @@ ros2 run warehouse_control mission_controller --ros-args \
   -r /warehouse/odom:=/warehouse/imu_odom
 ```
 
-This standalone example is FIFO with an explicitly ordered list; controller
-strategy selection is a separate change. Do not run another velocity publisher.
+This standalone example is FIFO with an explicitly ordered list; startup
+strategy selection is described above. Do not run another velocity publisher.
 The estimator, simulation and controller may start in either order: controllers
 publish only zero until feedback exists. `WAITING_FOR_SENSORS` requires an
 advancing clock and at least two fresh, advancing samples from **each** channel,
@@ -994,4 +1127,5 @@ with a known mount; it does not demonstrate drift-free yaw from a real IMU.
 Wheel slip/distance errors remain unobserved. Physical wheel separation stays
 0.38 m and the calibrated effective DiffDrive track stays 0.363 m. The 0.15 m
 physical acceptance limit is unchanged. See [integration checks and limitations](docs/imu-odometry-integration.md);
-the full three-strategy physical acceptance campaign remains a separate step.
+the [strategy campaign above](#controller-strategy-validation--2026-10-20) records
+the repeated explicitly remapped controller checks.
