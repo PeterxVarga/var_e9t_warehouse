@@ -8,6 +8,7 @@ from collections import deque
 from copy import deepcopy
 from math import atan2, cos, isfinite, sin
 from pathlib import Path
+import signal
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -19,6 +20,7 @@ import rclpy
 from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.signals import SignalHandlerOptions
 from sensor_msgs.msg import Imu
 
 from warehouse_control.heading_odometry import HeadingOdometry, heading, multiply, quaternion
@@ -238,18 +240,37 @@ class HeadingNode(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    """Finish ROS calls and cleanup before restoring normal signal handling."""
+    stop_requested = False
+
+    def interrupted(_signum, _frame):
+        # Do not raise through Humble's pybind11 calls, including destroy_node.
+        # Repeated launch/process-group signals must also leave cleanup intact.
+        nonlocal stop_requested
+        stop_requested = True
+
+    previous_term = signal.signal(signal.SIGTERM, interrupted)
+    previous_int = signal.signal(signal.SIGINT, interrupted)
     node = None
     try:
-        node = HeadingNode()
-        rclpy.spin(node)
+        rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+        if not stop_requested:
+            node = HeadingNode()
+        while rclpy.ok() and not stop_requested:
+            rclpy.spin_once(node, timeout_sec=0.1)
     except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     except (ValueError, OSError, ET.ParseError) as exc:
         print(f'Heading odometry failed: {exc}', file=sys.stderr)
         return 1
     finally:
-        if node is not None:
-            node.destroy_node()
-        rclpy.try_shutdown()
+        try:
+            try:
+                if node is not None:
+                    node.destroy_node()
+            finally:
+                rclpy.try_shutdown()
+        finally:
+            signal.signal(signal.SIGTERM, previous_term)
+            signal.signal(signal.SIGINT, previous_int)
     return 0
