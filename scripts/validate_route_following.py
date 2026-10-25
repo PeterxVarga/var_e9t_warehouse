@@ -270,6 +270,47 @@ class Trial:
                 assert self.sim_time - start_sim <= 180, '180s simulation deadline exceeded'
             terminal_sim = self.sim_time
             assert self.node.count_publishers('/warehouse/cmd_vel') == 1
+        measurement = self.verify_stop(
+            terminal_sim, allow_no_commands=self.case in ('invalid_goal', 'unreachable'))
+        result = dict(case=self.case, passed=True, start_sim=start_sim,
+                      terminal_sim=terminal_sim, execution_sim_seconds=terminal_sim-start_sim,
+                      wall_seconds=time.monotonic()-start_wall, **measurement,
+                      signal_sim=event, signal_node_pid=signal_pid,
+                      controller_parameters=list(self.controller_parameters))
+        self.result = result
+        result['physical_distance_m'] = sum(distance(a[1:3], b[1:3])
+                                           for a, b in zip(self.physical, self.physical[1:]))
+        result['odom_distance_m'] = sum(distance(a[1:3], b[1:3])
+                                       for a, b in zip(self.odom, self.odom[1:]))
+        if self.case in (*ROUTE_CASES, 'single_goal'):
+            odom_goal = (1, 0) if self.case == 'single_goal' else route.points[-1]
+            world_goal = (-3, -3) if self.case == 'single_goal' else (odom_goal[0]-4, odom_goal[1]-3)
+            result.update(odom_error_m=distance(self.odom[-1][1:3], odom_goal),
+                          physical_error_m=distance(self.physical[-1][1:3], world_goal),
+                          planned_length_m=1 if self.case == 'single_goal' else planned_length)
+            result['gates'] = dict(odom_accuracy=result['odom_error_m'] <= 0.05,
+                                   physical_accuracy=result['physical_error_m'] <= 0.15,
+                                   execution_time=result['execution_sim_seconds'] <= 180,
+                                   sampled_clearance=result['sampled_collision_count'] == 0,
+                                   stopped=result['stopped'])
+            if self.case != 'single_goal':
+                reached = re.findall(r'Waypoint \d+/\d+ (\w+) reached', self.text())
+                result['waypoints'] = reached
+                result['gates']['waypoint_order'] = reached == list(route.nodes)
+            result['passed'] = all(result['gates'].values())
+        else:
+            result['fault_latched'] = 'FAULT:' in self.text()
+            if self.case in ('invalid_start', 'moved_start', 'invalid_goal', 'unreachable'):
+                assert all(c[2:] == (0.0, 0.0) for c in self.commands)
+                controller_poses = [p for p in self.physical if p[0] >= start_sim]
+                assert max(distance(p[1:3], controller_start_pose) for p in controller_poses) < 0.001
+                result['controller_start_world_xy'] = controller_start_pose
+                result['controller_motion_m'] = max(distance(p[1:3], controller_start_pose)
+                                                     for p in controller_poses)
+        return result
+
+    def verify_stop(self, terminal_sim, allow_no_commands=False):
+        """Shared sampled-clearance and five-second physical-rest measurements."""
         # Allow one simulation second for braking, then prove five seconds of rest.
         rest_start = terminal_sim + 1
         self.until(lambda: self.physical[-1][0] >= rest_start, timeout=15)
@@ -293,51 +334,17 @@ class Trial:
         assert not collisions, collisions[:10]
         assert rest_displacement < 0.001 and rest_speed < 0.001 and rest_yaw < 0.001
         assert ((self.commands and self.commands[-1][2:] == (0.0, 0.0))
-                or self.case in ('invalid_goal', 'unreachable'))
+                or allow_no_commands)
         # After braking, no nonzero command may appear, including after feedback recovery.
         assert all(c[2:] == (0.0, 0.0) for c in self.commands if c[0] >= rest_start)
-        result = dict(case=self.case, passed=True, start_sim=start_sim,
-                      terminal_sim=terminal_sim, execution_sim_seconds=terminal_sim-start_sim,
-                      wall_seconds=time.monotonic()-start_wall, physical_samples=len(self.physical),
-                      max_physical_gap_seconds=max(gaps), sampled_collision_count=len(collisions),
-                      rest_seconds=rest_duration_ns * 1e-9, rest_displacement_m=rest_displacement,
-                      rest_speed_m_s=rest_speed, rest_yaw_rad=rest_yaw,
-                      final_physical_pose=self.physical[-1][1:],
-                      final_odom_pose=self.odom[-1][1:4], final_command=self.commands[-1] if self.commands else None,
-                      signal_sim=event, signal_node_pid=signal_pid,
-                      controller_parameters=list(self.controller_parameters))
-        self.result = result
-        result['physical_distance_m'] = sum(distance(a[1:3], b[1:3])
-                                           for a, b in zip(self.physical, self.physical[1:]))
-        result['odom_distance_m'] = sum(distance(a[1:3], b[1:3])
-                                       for a, b in zip(self.odom, self.odom[1:]))
-        if self.case in (*ROUTE_CASES, 'single_goal'):
-            odom_goal = (1, 0) if self.case == 'single_goal' else route.points[-1]
-            world_goal = (-3, -3) if self.case == 'single_goal' else (odom_goal[0]-4, odom_goal[1]-3)
-            result.update(odom_error_m=distance(self.odom[-1][1:3], odom_goal),
-                          physical_error_m=distance(self.physical[-1][1:3], world_goal),
-                          planned_length_m=1 if self.case == 'single_goal' else planned_length)
-            result['gates'] = dict(odom_accuracy=result['odom_error_m'] <= 0.05,
-                                   physical_accuracy=result['physical_error_m'] <= 0.15,
-                                   execution_time=result['execution_sim_seconds'] <= 180,
-                                   sampled_clearance=not collisions,
-                                   stopped=rest_displacement < 0.001 and rest_speed < 0.001
-                                   and rest_yaw < 0.001 and rest_duration_ns >= 5000000000)
-            if self.case != 'single_goal':
-                reached = re.findall(r'Waypoint \d+/\d+ (\w+) reached', self.text())
-                result['waypoints'] = reached
-                result['gates']['waypoint_order'] = reached == list(route.nodes)
-            result['passed'] = all(result['gates'].values())
-        else:
-            result['fault_latched'] = 'FAULT:' in self.text()
-            if self.case in ('invalid_start', 'moved_start', 'invalid_goal', 'unreachable'):
-                assert all(c[2:] == (0.0, 0.0) for c in self.commands)
-                controller_poses = [p for p in self.physical if p[0] >= start_sim]
-                assert max(distance(p[1:3], controller_start_pose) for p in controller_poses) < 0.001
-                result['controller_start_world_xy'] = controller_start_pose
-                result['controller_motion_m'] = max(distance(p[1:3], controller_start_pose)
-                                                     for p in controller_poses)
-        return result
+        return dict(physical_samples=len(self.physical),
+                    max_physical_gap_seconds=max(gaps), sampled_collision_count=len(collisions),
+                    rest_seconds=rest_duration_ns * 1e-9, rest_displacement_m=rest_displacement,
+                    rest_speed_m_s=rest_speed, rest_yaw_rad=rest_yaw,
+                    stopped=rest_duration_ns >= 5000000000,
+                    final_physical_pose=self.physical[-1][1:],
+                    final_odom_pose=self.odom[-1][1:4],
+                    final_command=self.commands[-1] if self.commands else None)
 
     def close(self):
         for proc in reversed(self.processes):

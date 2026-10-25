@@ -17,7 +17,7 @@ The robot completes pickup jobs on a known aisle network and returns to the depo
 
 ## Status
 
-The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning is available as a Python API and a geometrically checked CLI. A separate mission controller executes FIFO requests with simulated service stops and depot return. Mission execution supports startup FIFO, NN and NN+2-opt selection. Replanning remains under development.
+The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning is available as a Python API and a geometrically checked CLI. A separate mission controller executes FIFO requests with simulated service stops and depot return; [historical raw-wheel FIFO validation](docs/mission-execution-validation.md) recorded 342 passing package tests and three fresh Gazebo runs each for two missions on the recorded FIFO source. Mission execution supports startup FIFO, NN and NN+2-opt selection. Replanning remains under development.
 
 ## Development environment
 
@@ -928,6 +928,22 @@ Only the final depot arrival latches global `REACHED`; odometry faults latch
 `FAULT`. Neither terminal state automatically restarts. Waypoint, numbered
 arrival, simulated-service completion and final-depot logs include feedback and
 ROS-clock timestamps. Ctrl+C and direct SIGTERM send a final zero command.
+
+On 2026-10-13, using the raw-wheel FIFO implementation later committed as
+`726e62051383da691468b80f4ae3d0c8d8b0052d`, the full Humble build succeeded
+and all **342 tests** passed
+(183 control, 159 planning; no failures or skips). Three fresh Gazebo runs each
+passed for `r2c2 -> r1c4 -> depot` (24 m planned) and
+`r2c2 -> r1c0 -> r1c0 -> depot` (16 m planned). All service/depot odometry errors
+were at most 0.05 m; the largest physical error was **0.105024 m**, below the
+unchanged 0.15 m limit. Each run met the 360 simulation-second and 600 wall-second
+deadlines, exact waypoint/request order, separate service waits, sampled static
+clearance and at least five seconds of final physical rest. Empty execution,
+feedback loss during travel/service, feedback recovery without restart, Ctrl+C,
+direct SIGTERM and ten existing controller regressions also passed. See the
+[historical measurement report, isolated reproduction and limits](docs/mission-execution-validation.md).
+These results do not measure the current HEAD or the separately documented
+[IMU strategy campaign](#controller-strategy-validation--2026-10-20).
 
 Execution relies on wheel odometry and the known spawn in the current
 Fortress/DART model and installed warehouse geometry. Static graph validation
