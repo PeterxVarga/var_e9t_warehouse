@@ -110,6 +110,43 @@ def load_graph(path):
         return graph_from_data(json.load(stream, object_pairs_hook=_unique_object))
 
 
+def graph_without_edges(graph: Graph, blocked_edges) -> Graph:
+    """Copy a validated Graph, removing listed undirected edges in both directions.
+
+    blocked_edges must be a list/tuple of two-item lists/tuples naming existing
+    edges. Invalid entries (including reversed duplicates) raise ValueError.
+    Empty closures, isolated nodes and disconnected results are valid. Inputs
+    are unchanged; all nodes, coordinates, frame and depot are preserved.
+
+    This is a logical planning snapshot, not obstacle detection or live robot
+    replanning. Geometry validation remains the caller's responsibility.
+    """
+    if not isinstance(graph, Graph):
+        raise ValueError('graph must be a validated Graph from graph_from_data or load_graph')
+    if not isinstance(blocked_edges, (list, tuple)):
+        raise ValueError('blocked_edges must be a list or tuple')
+    existing = set(graph.edges)
+    blocked = set()
+    for pair in blocked_edges:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise ValueError('each blocked edge must be a pair of node identifiers')
+        a, b = map(_identifier, pair)
+        if a not in graph.nodes or b not in graph.nodes:
+            raise ValueError(f'unknown blocked edge endpoint: {a}, {b}')
+        if a == b:
+            raise ValueError(f'self-loop: {a}')
+        edge = tuple(sorted((a, b)))
+        if edge in blocked:
+            raise ValueError(f'duplicate undirected blocked edge: {a}, {b}')
+        if edge not in existing:
+            raise ValueError(f'blocked edge does not exist: {a}, {b}')
+        blocked.add(edge)
+    return graph_from_data(dict(
+        schema_version=1, frame=graph.frame, depot=graph.depot,
+        nodes=[dict(id=node, x=x, y=y) for node, (x, y) in graph.nodes.items()],
+        edges=[list(edge) for edge in graph.edges if edge not in blocked]))
+
+
 def shortest_path(graph, start_id, goal_id):
     """Return (ordered node list, metres), or None for an unreachable goal.
 

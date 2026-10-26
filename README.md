@@ -366,6 +366,56 @@ Unknown endpoints are errors. Identical endpoints return one node and 0 m.
 The reusable `shortest_path(graph, start_id, goal_id)` returns `(node_list,
 cost_m)` or `None` for an unreachable target without changing the graph.
 
+### Logical aisle closures (Python API)
+
+`graph_without_edges(graph, blocked_edges) -> Graph` takes a validated `Graph`
+from `load_graph` or `graph_from_data` and returns a new immutable snapshot.
+`blocked_edges` must be a list or tuple of two-item lists or tuples containing
+existing node identifiers. Each pair must name an edge in the input graph.
+Malformed inputs, unknown identifiers, self-loops, nonexistent edges and repeated
+undirected edges (including reversed pairs) raise `ValueError`. An empty list or
+tuple is valid and returns an equivalent new snapshot.
+
+Each closure removes both travel directions. The original graph and input lists
+stay unchanged; all nodes, coordinates, frame and depot remain, including isolated
+nodes. Remaining edge costs and deterministic ordering are preserved. The result
+can be passed directly to `shortest_path` or `plan_fifo_mission`. Disconnected
+graphs are allowed: unreachable routes return `None`, and unreachable mission
+legs raise `ValueError`, with no direct-motion fallback.
+
+After building and sourcing the packages as above, run this installed API example
+from `/tmp`:
+
+```bash
+cd /tmp
+python3 - <<'PY'
+from pathlib import Path
+from ament_index_python.packages import get_package_share_directory
+from warehouse_planning.roadmap import graph_without_edges, load_graph, shortest_path
+
+share = Path(get_package_share_directory('warehouse_planning'))
+graph = load_graph(share / 'config' / 'warehouse_graph.json')
+closed = graph_without_edges(graph, [('r0c0', 'r0c1')])
+print('Original:', shortest_path(graph, graph.depot, 'r0c2'))
+print('Closed:', shortest_path(closed, closed.depot, 'r0c2'))
+isolated = graph_without_edges(graph, [('r0c0', 'r0c1'), ('r0c0', 'r1c0')])
+print('Both depot exits closed:', shortest_path(isolated, isolated.depot, 'r0c2'))
+PY
+```
+
+Expected output (costs in metres):
+
+```text
+Original: (['r0c0', 'r0c1', 'r0c2'], 4.0)
+Closed: (['r0c0', 'r1c0', 'r1c1', 'r1c2', 'r1c3', 'r1c4', 'r0c4', 'r0c3', 'r0c2'], 16.0)
+Both depot exits closed: None
+```
+
+This is logical edge closure, not sensor-based obstacle detection. It does not
+modify the Gazebo world, stop the robot or replace a running controller's
+previously prepared plan. Geometry checks remain the caller's responsibility;
+this function performs graph validation only, without checking obstacle clearance.
+
 ### Geometry assumptions and limits
 
 Before planning, the CLI reads actual collision boxes from the installed
