@@ -1,4 +1,4 @@
-"""FIFO pickup plans on a validated graph, with a final depot return."""
+"""Ordered pickup plans on a validated graph, with a final depot return."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -33,6 +33,23 @@ class MissionPlan:
     total_distance_m: float
 
 
+@dataclass(frozen=True)
+class RemainingMissionPlan:
+    """Immutable remaining route with original request identities preserved.
+
+    Leg i serves original_requests[remaining_order[i]]; the final leg returns
+    to the depot. With no remaining requests, only a return leg is needed,
+    unless already at the depot, when there are no legs. Zero-length service
+    legs remain separate. The first route node is the explicit start node.
+    """
+
+    original_requests: tuple[str, ...]
+    remaining_order: tuple[int, ...]
+    legs: tuple[MissionLeg, ...]
+    nodes: tuple[str, ...]
+    total_distance_m: float
+
+
 def plan_fifo_mission(graph: Graph, pickup_nodes: Sequence[str]) -> MissionPlan:
     """Plan depot -> ordered pickups -> depot using shortest_path per leg.
 
@@ -44,6 +61,47 @@ def plan_fifo_mission(graph: Graph, pickup_nodes: Sequence[str]) -> MissionPlan:
     This preserves FIFO order; it does not optimize the order, command a robot
     or perform physical pickups. Geometry validation remains the caller's job.
     """
+    requests = _validated_requests(graph, pickup_nodes)
+    goals = (*requests, graph.depot) if requests else ()
+    legs, nodes, total = _plan_legs(graph, graph.depot, goals)
+    return MissionPlan(requests, legs, nodes, total)
+
+
+def plan_remaining_mission(graph: Graph, start_node: str,
+                           original_requests: Sequence[str],
+                           remaining_order: Sequence[int]) -> RemainingMissionPlan:
+    """Plan start -> remaining requests in supplied order -> depot.
+
+    Supply a validated Graph (possibly from graph_without_edges), an existing
+    start node, the full original request sequence, and unique original
+    zero-based request indices in the service order to retain. Sequences must
+    not be strings; indices must be integers, excluding bool. All input is
+    validated before route search, including requests omitted from the order.
+    Invalid input, unreachable legs or non-finite length raise ValueError
+    without a partial plan or direct-route fallback. Inputs are unchanged.
+
+    The caller decides which requests remain: neither the current node nor
+    passing through a later goal implies service. No ordering optimization,
+    odometry matching, intermediate-position handling, robot stopping or live
+    controller-plan replacement is performed. Check geometry separately.
+    """
+    requests = _validated_requests(graph, original_requests)
+    if not isinstance(start_node, str) or start_node not in graph.nodes:
+        raise ValueError('start_node must be an existing graph node identifier')
+    if (not isinstance(remaining_order, Sequence)
+            or isinstance(remaining_order, (str, bytes, bytearray))):
+        raise ValueError('remaining_order must be an ordered sequence of request indices')
+    order = tuple(remaining_order)
+    if (any(type(i) is not int or i < 0 or i >= len(requests) for i in order)
+            or len(set(order)) != len(order)):
+        raise ValueError('remaining_order must contain unique valid request indices (integers, not bool)')
+    goals = (*(requests[i] for i in order), graph.depot) if order or start_node != graph.depot else ()
+    legs, nodes, total = _plan_legs(graph, start_node, goals)
+    return RemainingMissionPlan(requests, order, legs, nodes, total)
+
+
+def _validated_requests(graph, pickup_nodes):
+    """Snapshot every request, retaining the FIFO validation contract."""
     if not isinstance(graph, Graph):
         raise ValueError('graph must be a validated Graph from graph_from_data or load_graph')
     if not isinstance(graph.depot, str) or graph.depot not in graph.nodes:
@@ -57,10 +115,13 @@ def plan_fifo_mission(graph: Graph, pickup_nodes: Sequence[str]) -> MissionPlan:
             raise ValueError(f'pickup request {index} must be a non-empty node identifier')
         if node not in graph.nodes:
             raise ValueError(f'unknown pickup node in request {index}: {node}')
+    return requests
 
-    legs, nodes, total = [], [graph.depot], 0.0
-    start = graph.depot
-    for index, goal in enumerate((*requests, graph.depot) if requests else (), 1):
+
+def _plan_legs(graph, start, goals):
+    """Build explicit service/return boundaries with the shared pathfinder."""
+    legs, nodes, total = [], [start], 0.0
+    for index, goal in enumerate(goals, 1):
         try:
             result = shortest_path(graph, start, goal)
         except ValueError as exc:
@@ -74,4 +135,4 @@ def plan_fifo_mission(graph: Graph, pickup_nodes: Sequence[str]) -> MissionPlan:
         legs.append(MissionLeg(start, goal, tuple(path), distance))
         nodes.extend(path[1:])
         start = goal
-    return MissionPlan(requests, tuple(legs), tuple(nodes), total)
+    return tuple(legs), tuple(nodes), total

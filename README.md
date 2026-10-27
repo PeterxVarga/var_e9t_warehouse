@@ -530,6 +530,86 @@ existing planner tests), with 0 errors, 0 failures and 0 skips. The installed
 mission API ran from `/tmp`, and the example above also produced the expected
 24 m plan. No Gazebo motion test was needed for this graph-only change.
 
+### Remaining-mission replanning from a graph node (Python API)
+
+`plan_remaining_mission(graph, start_node, original_requests, remaining_order)`
+plans from an explicit existing graph node, visits the remaining requests in
+the supplied order, and returns to `graph.depot`. Supply a validated `Graph`
+from `load_graph`, `graph_from_data` or `graph_without_edges`, the complete
+original request sequence, and an ordered sequence of **original zero-based
+request indices** still requiring service. Lists and tuples are supported;
+strings are not request/index sequences. Indices must be unique integers
+(excluding bool), nonnegative and within the original request list.
+
+The caller determines completion and retains the remaining part of the
+previously chosen FIFO, NN or NN+2-opt order. This API does not reorder it.
+Being at a request node or passing through a later target does not imply
+service. Every listed request gets its own `MissionLeg`, including a
+zero-length leg at the current node, repeated targets and depot requests.
+The final depot return remains a separate leg, even after a depot request.
+With no remaining requests, a robot outside the depot gets a return route;
+at the depot the result has no legs, just the depot node and zero distance.
+
+The frozen `RemainingMissionPlan` contains `original_requests`,
+`remaining_order`, `legs`, `nodes` and `total_distance_m`. All sequences are
+tuples; legs use the existing frozen `MissionLeg` type. Service leg i belongs
+to `original_requests[remaining_order[i]]`. `nodes` begins at `start_node`
+and joins leg paths without repeating shared boundary nodes; zero-length
+service boundaries remain in `legs`. Distances are graph path lengths in metres.
+
+All inputs, including omitted original requests, are validated before route
+search. Invalid input, an unreachable remaining request or depot, and
+non-finite distance raise `ValueError` without returning a partial plan or
+using a direct-route fallback. An omitted valid request need not be reachable.
+Inputs remain unchanged and routes use the existing deterministic Dijkstra
+search. The existing `plan_fifo_mission` API and empty-mission behavior are
+unchanged.
+
+After building and sourcing the packages, run this installed example from
+`/tmp`: original requests -> retained remaining indices -> closed graph ->
+new plan from the current graph node. Request 0 has been served; the retained
+order is request 2 followed by request 1.
+
+```bash
+cd /tmp
+python3 - <<'PY'
+from pathlib import Path
+from ament_index_python.packages import get_package_share_directory
+from warehouse_planning.mission import plan_remaining_mission
+from warehouse_planning.roadmap import graph_without_edges, load_graph
+
+share = Path(get_package_share_directory('warehouse_planning'))
+graph = load_graph(share / 'config' / 'warehouse_graph.json')
+original_requests = ['r1c0', 'r0c2', 'r1c2']
+remaining_order = [2, 1]
+closed = graph_without_edges(graph, [('r0c0', 'r0c1')])
+plan = plan_remaining_mission(closed, 'r1c0', original_requests, remaining_order)
+print('Original requests:', plan.original_requests)
+print('Remaining indices:', plan.remaining_order)
+for leg in plan.legs:
+    print(f'{leg.start} -> {leg.goal}: {leg.distance_m:g} m')
+print(f'Total remaining graph distance: {plan.total_distance_m:g} m')
+PY
+```
+
+Expected output (each warehouse edge is 2 m):
+
+```text
+Original requests: ('r1c0', 'r0c2', 'r1c2')
+Remaining indices: (2, 1)
+r1c0 -> r1c2: 4 m
+r1c2 -> r0c2: 10 m
+r0c2 -> r0c0: 16 m
+Total remaining graph distance: 30 m
+```
+
+`start_node` is explicitly a graph node: this API provides no matching from
+odometry, intermediate-position handling, robot stopping or replacement of
+a running controller's plan. It does not execute service or modify the Gazebo
+world. Geometry and obstacle-clearance checks remain the caller's responsibility;
+the example assumes the graph's geometry has already been checked. Live robot
+replanning and execution integration require separate work and validation.
+
 ### Nearest-neighbor request ordering
 
 `nearest_neighbor_order(graph, pickup_nodes)` returns an immutable tuple of
