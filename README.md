@@ -1081,6 +1081,57 @@ does not prove continuous collision safety or hardware accuracy. There is no
 mechanical loading, localization correction,
 replanning, dynamic obstacle avoidance or independent drive watchdog. A crash, SIGKILL or broken command bridge can prevent delivery of zero.
 
+### ROS-free mission pause and request checkpoint
+
+`MissionProgress.pause()` explicitly pauses an already started `TRACKING` or
+`SERVICING` mission. It sets `state` to `PAUSED`, immediately replaces
+`last_command` with `(0.0, 0.0, False)`, and returns a frozen `MissionCheckpoint`.
+Subsequent valid `command()` calls request zero linear and angular velocity,
+with the mission-reached flag false. They cannot advance waypoints, complete
+service or finish the depot return, even when feedback is at the target.
+
+The checkpoint has three tuple fields:
+
+- `original_requests`: the complete original request sequence;
+- `completed_order`: original zero-based indices whose service waits completed,
+  in actual completion order;
+- `remaining_order`: all other original indices in the already selected
+  execution order, preserving FIFO, NN or NN+2-opt ordering.
+
+Together the two index tuples cover every original request exactly once.
+Duplicate targets and depot requests remain separate requests. Arrival is not
+service completion: pausing during service keeps the current request pending
+and discards its partial service time. Pausing during the depot return produces
+an empty `remaining_order`, even before reaching the depot.
+
+Repeated `pause()` calls while `PAUSED` return the same checkpoint unchanged.
+Before the first successful start, or in latched `FAULT`/`REACHED`, `pause()`
+raises `RuntimeError` without changing state. `fail()` can still latch `FAULT`
+from `PAUSED`. Pose and timestamp validation remain active in `command()`:
+invalid poses/timestamps or backwards feedback/clock time raise `ValueError`
+and latch `FAULT`. Repeated timestamps remain non-advancing; fresh valid
+feedback never restarts a paused mission.
+
+The returned tuples can feed the existing planner directly:
+
+```python
+checkpoint = progress.pause()
+remaining = plan_remaining_mission(
+    graph, start_node, checkpoint.original_requests, checkpoint.remaining_order)
+```
+
+Import `plan_remaining_mission` from `warehouse_planning.mission`. The caller
+must choose an explicit graph `start_node` separately. A checkpoint records
+request bookkeeping; it makes no claim about the robot's physical location.
+Planning does not replace or restart the paused execution plan.
+
+This API publishes no ROS message. A caller must forward `command()` results
+through its existing command publisher; a zero request alone does not verify
+physical rest. The ROS node does not call `pause()` yet. ROS integration,
+physical-stop verification and resume support are future work; this slice adds
+no resume operation, plan replacement, ROS topic, shutdown callback or automatic
+node selection.
+
 ### Controller strategy selection
 
 The startup-only, read-only **STRING** parameter `strategy` accepts `fifo`

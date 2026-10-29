@@ -15,6 +15,21 @@ SERVICE_NS = 1000000000
 
 
 @dataclass(frozen=True)
+class MissionCheckpoint:
+    """Request bookkeeping at pause time, not a physical robot location.
+
+    Orders contain original zero-based indices, preserving separate requests
+    at the same node. Only completed service waits belong to completed_order.
+    Supply original_requests and remaining_order to plan_remaining_mission
+    with a separately chosen start node; this neither replans nor resumes.
+    """
+
+    original_requests: tuple[str, ...]
+    completed_order: tuple[int, ...]
+    remaining_order: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class MissionEvent:
     """A progress observation, not evidence of mechanical loading."""
 
@@ -92,6 +107,7 @@ class MissionProgress:
         self.events = ()
         self.last_stamp = self.last_clock = self.service_start = None
         self.last_command = (0.0, 0.0, False)
+        self._checkpoint = None
 
     @property
     def original_requests(self):
@@ -116,6 +132,28 @@ class MissionProgress:
     @property
     def points(self):
         return self._points
+
+    def pause(self) -> MissionCheckpoint:
+        """Latch PAUSED and zero the stored command without publishing ROS.
+
+        Only a started TRACKING/SERVICING mission can pause. Other states
+        raise RuntimeError unchanged, except PAUSED returns the same frozen
+        checkpoint. Partial service time is discarded; arrival alone never
+        completes a request. The caller must forward command() results.
+        This does not verify physical rest and there is no resume operation.
+        """
+        if self.state == 'PAUSED':
+            return self._checkpoint
+        if not self.started or self.state not in ('TRACKING', 'SERVICING'):
+            raise RuntimeError('pause requires a started TRACKING or SERVICING mission')
+        self._checkpoint = MissionCheckpoint(
+            self._original_requests,
+            self._request_order[:self.completed_requests],
+            self._request_order[self.completed_requests:])
+        self.state = 'PAUSED'
+        self.service_start = None
+        self.last_command = (0.0, 0.0, False)
+        return self._checkpoint
 
     def fail(self):
         if self.state != 'REACHED':
@@ -166,6 +204,9 @@ class MissionProgress:
         if not self.started:
             validate_start(pose)
             self.started = True
+        if self.state == 'PAUSED':
+            # Keep pose/time validation active, but never advance execution.
+            return 0.0, 0.0, False
         if not self.plan.legs:
             self.state = 'REACHED'
             self._event('depot', stamp, now)
