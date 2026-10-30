@@ -1127,10 +1127,106 @@ Planning does not replace or restart the paused execution plan.
 
 This API publishes no ROS message. A caller must forward `command()` results
 through its existing command publisher; a zero request alone does not verify
-physical rest. The ROS node does not call `pause()` yet. ROS integration,
-physical-stop verification and resume support are future work; this slice adds
-no resume operation, plan replacement, ROS topic, shutdown callback or automatic
-node selection.
+physical rest. The ROS node does not call `pause()` yet. For explicit ROS-free
+plan replacement, use the node-based API below.
+
+### ROS-free resume from an explicit graph node
+
+`progress.resume_from_node(graph, start_node, transform, pose, config,
+feedback_stamp, clock_stamp)` replans and resumes only an already started
+`PAUSED` mission. Other states raise `RuntimeError` unchanged, including
+`TRACKING`, `SERVICING`, and latched `REACHED` or `FAULT`. It cannot clear a fault.
+
+Supply a geometry-checked `Graph`, an explicit existing `start_node`, a static
+`PlanarTransform` describing the world pose of the odometry origin, a finite
+odometry `(x, y, yaw)` pose, and the usual `ControlConfig`. The API transforms
+the node's world coordinates into odometry coordinates and checks the supplied
+position against `config.goal_tolerance` (default 0.05 m, inclusive). It accepts
+any finite yaw; neither a depot start nor the depot's starting yaw is required.
+It never selects a nearest node. Resuming from an intermediate edge position
+is unsupported; the supplied pose must match the explicit node within tolerance.
+
+Both timestamps are nonnegative integer nanoseconds, excluding booleans, and
+must be strictly newer than the corresponding last processed feedback and clock
+times, including samples processed while paused. On success they become the new
+time bounds; repeated samples cannot advance execution and backwards time still
+latches `FAULT` in `command()`. A rejected resume raises `ValueError` without
+changing the paused mission or consuming timestamps. Timestamp ordering alone
+does not prove network freshness or physical rest. The caller must establish
+those properties, correct frames and a geometry-checked graph; this API does
+not validate obstacle clearance or the graph's geometry against the world.
+
+The complete replacement uses `plan_remaining_mission` with the checkpoint's
+`original_requests` and `remaining_order`, including the final depot return.
+FIFO/NN/NN+2-opt ordering is retained without running an optimizer again.
+Every transformed waypoint and `RouteProgress` is validated locally before
+any execution state is replaced. Invalid input, an unreachable service/return
+leg or candidate validation failure leaves the old plan, routes, checkpoint,
+times and counters unchanged in `PAUSED`, with `last_command == (0.0, 0.0, False)`.
+There is no partial replacement or direct-motion fallback.
+
+Success returns `None`, sets `TRACKING`, resets the active leg index to zero,
+and clears events and partial service time while preserving the original
+mission bookkeeping. The stored command stays zero. The resume call issues no
+motion command and never replays the pre-pause velocity. Subsequent fresh
+`command()` calls execute the plan through the usual waypoint/service logic.
+Interrupted service starts a new full one-second continuous wait after arrival.
+Completed requests never repeat; separate requests at the same node each keep
+their original identity and service wait. With no remaining requests the robot
+still returns to the depot. If already at the depot, the replacement has no
+legs and the next fresh `command()` completes it without motion, emitting the
+usual final-depot event.
+
+Index meanings after replacement:
+
+- `original_requests`, `request_order` and `strategy` retain the full original
+  mission and its startup order/strategy; `completed_requests` counts completed
+  services over the entire mission, across every pause/resume cycle.
+- `plan` becomes a `RemainingMissionPlan`; its `remaining_order` maps its
+  service legs to original request indices. `leg_index`, `points`, `route`,
+  event `leg` and event `waypoint` describe only the active replacement plan.
+- `request_index(leg)` maps an active leg to an original request index, as does
+  event `request_index`; the return leg has `None`. Checkpoint `completed_order`
+  and `remaining_order` always partition the original indices. Before any resume,
+  the original `MissionPlan` and existing startup/event behavior are unchanged.
+
+This standalone synthetic example runs with the installed Python packages:
+
+```python
+from warehouse_control.control import ControlConfig
+from warehouse_control.mission import MissionProgress
+from warehouse_control.route import PlanarTransform
+from warehouse_planning.mission import plan_fifo_mission
+from warehouse_planning.roadmap import graph_from_data
+
+graph = graph_from_data(dict(
+    schema_version=1, frame='world', depot='depot',
+    nodes=[dict(id='depot', x=0, y=0), dict(id='pickup', x=1, y=0)],
+    edges=[['depot', 'pickup']]))
+transform = PlanarTransform(0, 0, 0)
+config = ControlConfig()
+plan = plan_fifo_mission(graph, ['pickup'])
+points = [[transform.world_to_odom(graph.nodes[n]) for n in leg.nodes]
+          for leg in plan.legs]
+progress = MissionProgress(plan, points)
+assert progress.command((0, 0, 0), config, 1, 1) == (0.0, 0.0, False)
+checkpoint = progress.pause()
+
+# In real use: forward zero, establish rest and fresh odometry, and separately
+# check the replacement graph's geometry. These poses/times are synthetic.
+progress.resume_from_node(graph, 'pickup', transform, (1, 0, 1.2), config, 2, 2)
+assert progress.last_command == (0.0, 0.0, False)
+assert progress.plan.remaining_order == checkpoint.remaining_order == (0,)
+assert progress.command((1, 0, 1.2), config, 3, 3) == (0.0, 0.0, False)
+assert progress.state == 'SERVICING'  # Arrival is not completed service.
+assert progress.command((1, 0, 1.2), config, 1000000003, 1000000003) == (0.0, 0.0, False)
+assert progress.completed_requests == 1
+```
+
+This API is ROS-free and assumes serialized calls. It adds no ROS service,
+topic, obstacle sensing, intermediate-position handling or visualization. The
+ROS controller does not invoke it; transport integration and physical stopping
+remain the caller's responsibility.
 
 ### Controller strategy selection
 

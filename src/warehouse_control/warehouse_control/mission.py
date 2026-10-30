@@ -4,9 +4,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from math import hypot
 
-from warehouse_control.control import goal_command
-from warehouse_control.route import RouteProgress, _finite, load_spawn, validate_start
-from warehouse_planning.mission import plan_fifo_mission
+from warehouse_control.control import ControlConfig, goal_command
+from warehouse_control.route import (
+    PlanarTransform, RouteProgress, _finite, load_spawn, validate_start,
+)
+from warehouse_planning.mission import plan_fifo_mission, plan_remaining_mission
 from warehouse_planning.ordering import nearest_neighbor_order, two_opt_order
 from warehouse_planning.roadmap import load_graph, load_obstacles, validate_geometry
 
@@ -74,6 +76,8 @@ class MissionProgress:
     The caller must also validate odometry frames, freshness and quaternion.
     Each call completes at most one request. Both terminal states latch.
     Plan and point data are immutable snapshots; world poses are never inputs.
+    leg_index and event leg/waypoint indices refer to the active plan; request
+    indices, request_order and completed_requests refer to the original mission.
     """
 
     def __init__(self, plan, leg_points, *, original_requests=None,
@@ -93,6 +97,7 @@ class MissionProgress:
         if not isinstance(strategy, str) or strategy not in ('fifo', 'nn', 'nn-2opt'):
             raise ValueError('strategy must be one of fifo, nn, nn-2opt')
         self._strategy = strategy
+        self._active_order = self._request_order
         self._points = tuple(tuple(_finite(p, 2, 'waypoint') for p in leg)
                              for leg in leg_points)
         if len(self._points) != len(plan.legs):
@@ -122,8 +127,8 @@ class MissionProgress:
         return self._strategy
 
     def request_index(self, leg):
-        """Original zero-based request identity; the return leg has no request."""
-        return self._request_order[leg] if leg < len(self._request_order) else None
+        """Map an active-plan leg to its original request; return has no request."""
+        return self._active_order[leg] if leg < len(self._active_order) else None
 
     @property
     def route(self):
@@ -140,7 +145,8 @@ class MissionProgress:
         raise RuntimeError unchanged, except PAUSED returns the same frozen
         checkpoint. Partial service time is discarded; arrival alone never
         completes a request. The caller must forward command() results.
-        This does not verify physical rest and there is no resume operation.
+        This does not verify physical rest; resume_from_node requires a
+        separately supplied graph node and matching fresh odometry.
         """
         if self.state == 'PAUSED':
             return self._checkpoint
@@ -154,6 +160,61 @@ class MissionProgress:
         self.service_start = None
         self.last_command = (0.0, 0.0, False)
         return self._checkpoint
+
+    def resume_from_node(self, graph, start_node, transform, pose, config,
+                         feedback_stamp, clock_stamp):
+        """Atomically replan a started PAUSED mission from an explicit node.
+
+        Supply a geometry-checked Graph and static PlanarTransform from world
+        to odom. The finite odom pose must match start_node within config's
+        position tolerance; yaw is unrestricted. Both integer nanosecond
+        timestamps must be nonnegative and strictly newer than processed time.
+        These checks prove neither transport freshness nor physical rest;
+        stopping, frame correctness and those checks remain the caller's job.
+
+        plan_remaining_mission retains checkpoint order and original request
+        identities without optimization. Build and validate every candidate
+        leg before replacing execution state. Invalid input raises ValueError;
+        invalid state raises RuntimeError. Failures leave PAUSED unchanged.
+        Success returns None, resets active leg_index to zero and clears events
+        and partial service. Global completed_requests and request_order remain.
+        No command is issued: fresh command() calls execute the replacement
+        plan, including an empty plan's stationary depot completion.
+        """
+        if not self.started or self.state != 'PAUSED':
+            raise RuntimeError('resume requires a started PAUSED mission')
+        pose = _finite(pose, 3, 'odometry pose')
+        if any(type(t) is not int or t < 0 for t in (feedback_stamp, clock_stamp)):
+            raise ValueError('mission timestamps must be nonnegative integer nanoseconds')
+        if ((self.last_stamp is not None and feedback_stamp <= self.last_stamp)
+                or (self.last_clock is not None and clock_stamp <= self.last_clock)):
+            raise ValueError('resume requires strictly newer feedback and clock timestamps')
+        if not isinstance(transform, PlanarTransform):
+            raise ValueError('transform must be a static PlanarTransform')
+        if not isinstance(config, ControlConfig):
+            raise ValueError('config must be a ControlConfig')
+        checkpoint = self._checkpoint
+        plan = plan_remaining_mission(graph, start_node, checkpoint.original_requests,
+                                      checkpoint.remaining_order)
+        start_point = transform.world_to_odom(graph.nodes[start_node])
+        if not goal_command(*pose, *start_point, config)[2]:
+            raise ValueError('odometry position does not match start_node')
+        points = tuple(tuple(transform.world_to_odom(graph.nodes[node])
+                             for node in leg.nodes) for leg in plan.legs)
+        routes = tuple(RouteProgress(leg.nodes, leg_points)
+                       for leg, leg_points in zip(plan.legs, points))
+
+        self.plan = plan
+        self._points = points
+        self._routes = routes
+        self._active_order = plan.remaining_order
+        self.leg_index = 0
+        self.service_start = None
+        self.events = ()
+        self.last_stamp, self.last_clock = feedback_stamp, clock_stamp
+        self.last_command = (0.0, 0.0, False)
+        self._checkpoint = None
+        self.state = 'TRACKING'
 
     def fail(self):
         if self.state != 'REACHED':
@@ -238,7 +299,7 @@ class MissionProgress:
                                          self.request_index(self.leg_index)),)
         if not command[2]:
             return command
-        if self.leg_index < len(self.plan.pickup_nodes):
+        if self.leg_index < len(self._active_order):
             self.state = 'SERVICING'
             self.service_start = (stamp, now)
             self._event('arrival', stamp, now)
