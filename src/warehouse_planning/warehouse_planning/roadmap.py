@@ -154,6 +154,8 @@ def shortest_path(graph, start_id, goal_id):
     ordering and retaining the first equal-cost predecessor make ties stable
     regardless of JSON node/edge ordering. The input graph is never modified.
     """
+    if not isinstance(graph, Graph):
+        raise ValueError('graph must be a validated Graph from graph_from_data or load_graph')
     for identifier in (start_id, goal_id):
         if not isinstance(identifier, str) or identifier not in graph.nodes:
             raise ValueError(f'unknown endpoint: {identifier}')

@@ -129,6 +129,8 @@ def _plan_legs(graph, start, goals):
         if result is None:
             raise ValueError(f'mission leg {index} ({start} -> {goal}) is unreachable')
         path, distance = result
+        if type(distance) not in (int, float) or not isfinite(distance) or distance < 0:
+            raise ValueError(f'mission leg {index} ({start} -> {goal}) distance must be finite and nonnegative')
         total += distance
         if not isfinite(total):
             raise ValueError(f'total mission distance is not finite at leg {index} ({start} -> {goal})')
