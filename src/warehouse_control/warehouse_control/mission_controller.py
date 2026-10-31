@@ -6,6 +6,7 @@ from ament_index_python.packages import PackageNotFoundError, get_package_share_
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 from rclpy.exceptions import InvalidParameterTypeException
 from rclpy.parameter import Parameter
+from std_srvs.srv import Trigger
 
 from warehouse_control.goal_controller import GoalController, run_controller
 from warehouse_control.mission import prepare_mission
@@ -14,6 +15,27 @@ from warehouse_control.mission import prepare_mission
 class MissionController(GoalController):
     def __init__(self):
         super().__init__('mission_controller')
+        # The default mutually exclusive callback group serializes this service
+        # with odometry and the control timer, including with a multithreaded executor.
+        self.pause_service = self.create_service(
+            Trigger, '/warehouse/pause_mission', self.on_pause)
+
+    def on_pause(self, _request, response):
+        if self.state in ('FAULT', 'REACHED'):
+            response.success = False
+            response.message = f'Pause unavailable: mission is {self.state}.'
+            return response
+        try:
+            self.mission.pause()
+        except RuntimeError:
+            response.success = False
+            response.message = 'Pause unavailable: mission has not started.'
+            return response
+        self.transition('PAUSED', 'pause request accepted')
+        self.publish_stop()
+        response.success = True
+        response.message = 'Pause request accepted.'
+        return response
 
     def goal_parameters(self):
         try:
