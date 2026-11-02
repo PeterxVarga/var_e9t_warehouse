@@ -1,12 +1,16 @@
 """Execute a startup-configured ordered mission using configured odometry feedback."""
 
+from collections import deque
+from math import atan2, cos, hypot, isfinite, sin
 from pathlib import Path
+import time
 
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 from rclpy.exceptions import InvalidParameterTypeException
 from rclpy.parameter import Parameter
 from std_srvs.srv import Trigger
+from warehouse_interfaces.srv import ResumeMission
 
 from warehouse_control.goal_controller import GoalController, run_controller
 from warehouse_control.mission import prepare_mission
@@ -17,24 +21,89 @@ class MissionController(GoalController):
         super().__init__('mission_controller')
         # The default mutually exclusive callback group serializes this service
         # with odometry and the control timer, including with a multithreaded executor.
+        self.rest_samples = deque(maxlen=4096)
         self.pause_service = self.create_service(
             Trigger, '/warehouse/pause_mission', self.on_pause)
+        self.resume_service = self.create_service(
+            ResumeMission, '/warehouse/resume_mission', self.on_resume)
 
     def on_pause(self, _request, response):
         if self.state in ('FAULT', 'REACHED'):
             response.success = False
             response.message = f'Pause unavailable: mission is {self.state}.'
             return response
+        already_paused = self.state == 'PAUSED'
         try:
             self.mission.pause()
         except RuntimeError:
             response.success = False
             response.message = 'Pause unavailable: mission has not started.'
             return response
+        if not already_paused:
+            self.rest_samples.clear()
         self.transition('PAUSED', 'pause request accepted')
         self.publish_stop()
         response.success = True
         response.message = 'Pause request accepted.'
+        return response
+
+    def _check_rest(self, now, wall):
+        """Check the bounded, continuously sampled paused odometry window."""
+        samples = self.rest_samples
+        if self.state != 'PAUSED' or self.mission.state != 'PAUSED':
+            raise ValueError('mission is not PAUSED')
+        if not samples or self.pose is None or self.received is None:
+            raise ValueError('no paused odometry observation')
+        if (now <= 0 or (self.last_clock is not None and now < self.last_clock)
+                or wall < self.received or wall - self.received > min(self.timeout, 0.2)
+                or abs(now - self.stamp) > min(self.timeout, 0.2) * 1e9):
+            raise ValueError('odometry or ROS clock is stale or invalid')
+        first, last = samples[0], samples[-1]
+        if last[0] != self.stamp or last[1] != self.received:
+            raise ValueError('odometry observation was replaced')
+        if last[0] - first[0] < 500000000 or last[1] - first[1] < 0.5:
+            raise ValueError('need at least 0.5 s of paused odometry')
+        if any(b[0] - a[0] > 200000000 or b[1] - a[1] > 0.2
+               or b[0] <= a[0] or b[1] <= a[1]
+               for a, b in zip(samples, list(samples)[1:])):
+            raise ValueError('paused odometry has a sampling gap')
+        x, y, yaw = first[2]
+        if any(not sample[3] or hypot(sample[2][0] - x, sample[2][1] - y) > 0.002
+               or abs(atan2(sin(sample[2][2] - yaw), cos(sample[2][2] - yaw))) > 0.002
+               for sample in samples):
+            raise ValueError('odometry indicates motion or invalid velocity')
+
+    def on_resume(self, request, response):
+        try:
+            now, wall = self.get_clock().now().nanoseconds, time.monotonic()
+            self._check_rest(now, wall)
+            if request.start_node not in self.mission.validated_graph.nodes:
+                raise ValueError(f'unknown graph node: {request.start_node}')
+            stamp, received, pose = self.stamp, self.received, self.pose
+
+            def precommit():
+                # The default mutually exclusive callback group prevents odom,
+                # pause and timer callbacks from replacing the snapshot here.
+                current = self.get_clock().now().nanoseconds
+                self._check_rest(current, time.monotonic())
+                if (self.stamp, self.received, self.pose) != (stamp, received, pose):
+                    raise ValueError('odometry changed during planning')
+                if current < now:
+                    raise ValueError('ROS time moved backwards during planning')
+
+            self.mission.resume_from_node(
+                self.mission.validated_graph, request.start_node, self.transform,
+                pose, self.config, stamp, now, precommit=precommit)
+        except (ValueError, RuntimeError) as exc:
+            if self.state == 'PAUSED':
+                self.publish_stop()
+            response.success = False
+            response.message = f'Resume unavailable: {exc}'
+            return response
+        self.rest_samples.clear()
+        self.transition('TRACKING', f'resume accepted from {request.start_node}')
+        response.success = True
+        response.message = f'Resumed from {request.start_node}.'
         return response
 
     def goal_parameters(self):
@@ -122,6 +191,29 @@ class MissionController(GoalController):
     def on_odom(self, msg):
         previous = self.stamp
         super().on_odom(msg)
+        if self.state == 'PAUSED':
+            if self.stamp != previous:
+                twist = msg.twist.twist
+                velocity = (twist.linear.x, twist.linear.y, twist.linear.z,
+                            twist.angular.x, twist.angular.y, twist.angular.z)
+                still = all(isfinite(v) and abs(v) <= 0.01 for v in velocity)
+                samples = self.rest_samples
+                if samples and (self.stamp - samples[-1][0] > 200000000
+                                or self.received - samples[-1][1] > 0.2
+                                or self.received <= samples[-1][1]):
+                    samples.clear()
+                samples.append((self.stamp, self.received, self.pose, still))
+                # Bound the observation even if one clock advances very slowly.
+                while (samples and (self.stamp - samples[0][0] > 2000000000
+                                    or self.received - samples[0][1] > 2.0)):
+                    samples.popleft()
+                # Keep the shortest suffix covering both required durations.
+                while (len(samples) > 2 and self.stamp - samples[1][0] >= 500000000
+                       and self.received - samples[1][1] >= 0.5):
+                    samples.popleft()
+            else:
+                # Duplicate/invalid input must not refresh or bridge a window.
+                self.rest_samples.clear()
         if self.state not in ('FAULT', 'REACHED') and self.stamp != previous:
             # A departure followed by a return between timer callbacks must
             # still invalidate the continuous service interval.

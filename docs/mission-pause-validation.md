@@ -5,8 +5,9 @@ controller. A successful response acknowledges acceptance of the pause request;
 it does not certify physical rest. A started mission is paused immediately, its
 checkpoint retains each unfinished original request, and zero velocity is
 published. Repeated requests return success without changing the checkpoint.
-Requests before startup or after `REACHED` or `FAULT` fail. There is no ROS
-resume interface in this change. Odometry and time faults remain latched during
+Requests before startup or after `REACHED` or `FAULT` fail. The separate
+[resume interface](mission-resume-validation.md) checks paused odometry before replanning.
+Odometry and time faults remain latched during
 pause, and feedback recovery cannot resume motion.
 
 ## Predefined Gazebo gates

@@ -66,8 +66,10 @@ def prepare_mission(graph_path, sdf_path, pickup_nodes, strategy='fifo'):
     plan = plan_fifo_mission(graph, [requests[i] for i in order])
     points = tuple(tuple(transform.world_to_odom(graph.nodes[node]) for node in leg.nodes)
                    for leg in plan.legs)
-    return MissionProgress(plan, points, original_requests=requests,
-                           request_order=order, strategy=strategy), transform
+    mission = MissionProgress(plan, points, original_requests=requests,
+                              request_order=order, strategy=strategy)
+    mission.validated_graph = graph
+    return mission, transform
 
 
 class MissionProgress:
@@ -162,7 +164,7 @@ class MissionProgress:
         return self._checkpoint
 
     def resume_from_node(self, graph, start_node, transform, pose, config,
-                         feedback_stamp, clock_stamp):
+                         feedback_stamp, clock_stamp, *, precommit=None):
         """Atomically replan a started PAUSED mission from an explicit node.
 
         Supply a geometry-checked Graph and static PlanarTransform from world
@@ -176,8 +178,10 @@ class MissionProgress:
         identities without optimization. Build and validate every candidate
         leg before replacing execution state. Invalid input raises ValueError;
         invalid state raises RuntimeError. Failures leave PAUSED unchanged.
-        Success returns None, resets active leg_index to zero and clears events
-        and partial service. Global completed_requests and request_order remain.
+        An optional precommit callback can reject the complete candidate before
+        any state is replaced. Success returns None, resets active leg_index to
+        zero and clears events and partial service. Global completed_requests
+        and request_order remain.
         No command is issued: fresh command() calls execute the replacement
         plan, including an empty plan's stationary depot completion.
         """
@@ -203,6 +207,9 @@ class MissionProgress:
                              for node in leg.nodes) for leg in plan.legs)
         routes = tuple(RouteProgress(leg.nodes, leg_points)
                        for leg, leg_points in zip(plan.legs, points))
+
+        if precommit is not None:
+            precommit()
 
         self.plan = plan
         self._points = points
