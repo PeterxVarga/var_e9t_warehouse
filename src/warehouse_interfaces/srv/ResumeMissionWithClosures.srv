@@ -1,0 +1,7 @@
+# Explicit graph node matching the stopped robot's fresh odometry.
+string start_node
+# Complete replacement closure list; empty explicitly reopens all edges.
+warehouse_interfaces/ClosedEdge[] closed_edges
+---
+bool success
+string message

@@ -9,11 +9,15 @@ from ament_index_python.packages import PackageNotFoundError, get_package_share_
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 from rclpy.exceptions import InvalidParameterTypeException
 from rclpy.parameter import Parameter
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import Trigger
-from warehouse_interfaces.srv import ResumeMission
+from visualization_msgs.msg import MarkerArray
+from warehouse_interfaces.srv import ResumeMission, ResumeMissionWithClosures
+from warehouse_planning.roadmap import graph_without_edges
 
 from warehouse_control.goal_controller import GoalController, run_controller
 from warehouse_control.mission import prepare_mission
+from warehouse_control.mission_markers import mission_markers
 
 
 class MissionController(GoalController):
@@ -22,10 +26,27 @@ class MissionController(GoalController):
         # The default mutually exclusive callback group serializes this service
         # with odometry and the control timer, including with a multithreaded executor.
         self.rest_samples = deque(maxlen=4096)
+        self.accepted_closures = ()
+        self.before_resume_plan = None
+        self.marker_publisher = self.create_publisher(
+            MarkerArray, '/warehouse/mission_plan_markers', QoSProfile(
+                depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.pause_service = self.create_service(
             Trigger, '/warehouse/pause_mission', self.on_pause)
         self.resume_service = self.create_service(
             ResumeMission, '/warehouse/resume_mission', self.on_resume)
+        self.closures_service = self.create_service(
+            ResumeMissionWithClosures, '/warehouse/resume_mission_with_closures',
+            self.on_resume_with_closures)
+        self.publish_plan_markers()
+
+    def publish_plan_markers(self):
+        remaining = self.mission._active_order[self.mission.leg_index:]
+        self.marker_publisher.publish(mission_markers(
+            self.mission.validated_graph, self.transform, self.mission.plan,
+            self.before_resume_plan, self.accepted_closures,
+            self.mission.original_requests, remaining, self.get_clock().now().to_msg()))
 
     def on_pause(self, _request, response):
         if self.state in ('FAULT', 'REACHED'):
@@ -41,6 +62,8 @@ class MissionController(GoalController):
             return response
         if not already_paused:
             self.rest_samples.clear()
+            self.before_resume_plan = self.mission.plan
+            self.publish_plan_markers()
         self.transition('PAUSED', 'pause request accepted')
         self.publish_stop()
         response.success = True
@@ -74,12 +97,24 @@ class MissionController(GoalController):
             raise ValueError('odometry indicates motion or invalid velocity')
 
     def on_resume(self, request, response):
+        # Compatibility service deliberately retains the last accepted closures.
+        return self._resume(request.start_node, self.accepted_closures, response)
+
+    def on_resume_with_closures(self, request, response):
+        edges = tuple((edge.node_a, edge.node_b) for edge in request.closed_edges)
+        return self._resume(request.start_node, edges, response)
+
+    def _resume(self, start_node, closed_edges, response):
+        """Validate and commit one complete plan/closure snapshot for both APIs."""
         try:
             now, wall = self.get_clock().now().nanoseconds, time.monotonic()
             self._check_rest(now, wall)
-            if request.start_node not in self.mission.validated_graph.nodes:
-                raise ValueError(f'unknown graph node: {request.start_node}')
+            if start_node not in self.mission.validated_graph.nodes:
+                raise ValueError(f'unknown graph node: {start_node}')
+            graph = graph_without_edges(self.mission.validated_graph, closed_edges)
+            closures = tuple(sorted(tuple(sorted(edge)) for edge in closed_edges))
             stamp, received, pose = self.stamp, self.received, self.pose
+            previous_plan = self.mission.plan
 
             def precommit():
                 # The default mutually exclusive callback group prevents odom,
@@ -92,7 +127,7 @@ class MissionController(GoalController):
                     raise ValueError('ROS time moved backwards during planning')
 
             self.mission.resume_from_node(
-                self.mission.validated_graph, request.start_node, self.transform,
+                graph, start_node, self.transform,
                 pose, self.config, stamp, now, precommit=precommit)
         except (ValueError, RuntimeError) as exc:
             if self.state == 'PAUSED':
@@ -100,10 +135,19 @@ class MissionController(GoalController):
             response.success = False
             response.message = f'Resume unavailable: {exc}'
             return response
+        # No callback can observe a partial commit in this mutually exclusive
+        # group. Failed planning/precommit leaves closures and markers untouched.
+        self.accepted_closures = closures
+        self.before_resume_plan = previous_plan
+        self.publish_plan_markers()
         self.rest_samples.clear()
-        self.transition('TRACKING', f'resume accepted from {request.start_node}')
+        self.transition('TRACKING', f'resume accepted from {start_node}')
+        self.get_logger().info(
+            f'Accepted resume plan: start={start_node}; closures={closures}; '
+            f'route={self.mission.plan.nodes}; '
+            f'remaining_request_ids={tuple(i + 1 for i in self.mission._active_order)}')
         response.success = True
-        response.message = f'Resumed from {request.start_node}.'
+        response.message = f'Resumed from {start_node}; {len(closures)} closed edge(s).'
         return response
 
     def goal_parameters(self):
@@ -186,6 +230,8 @@ class MissionController(GoalController):
             else:
                 message = f'Pickup request {event.request_index + 1} {event.node} {event.kind}'
             self.get_logger().info(f'{message}; {timing}')
+        if any(event.kind in ('serviced', 'depot') for event in self.mission.events):
+            self.publish_plan_markers()
         return command
 
     def on_odom(self, msg):

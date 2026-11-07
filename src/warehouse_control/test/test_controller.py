@@ -37,7 +37,7 @@ def harness(monkeypatch):
     def create(factory=RouteController):
         node = factory()
         node.get_clock = lambda: SimpleNamespace(
-            now=lambda: SimpleNamespace(nanoseconds=clock.ros))
+            now=lambda: rclpy.time.Time(nanoseconds=clock.ros))
         nodes.append(node)
         return node
 

@@ -17,7 +17,25 @@ The robot completes pickup jobs on a known aisle network and returns to the depo
 
 ## Status
 
-The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning is available as a Python API and a geometrically checked CLI. A separate mission controller executes FIFO requests with simulated service stops and depot return; [historical raw-wheel FIFO validation](docs/mission-execution-validation.md) recorded 342 passing package tests and three fresh Gazebo runs each for two missions on the recorded FIFO source. Mission execution supports startup FIFO, NN and NN+2-opt selection. Replanning remains under development.
+The warehouse world and differential-drive robot run in headless and graphical Gazebo modes. An odometry-based controller autonomously tracks a single goal and stops on arrival or feedback faults. A separate planner validates a static aisle graph and computes shortest graph routes. An aisle-route follower connects these components. Route-following validation passed the Humble build and 242 package tests. A measurement-based effective-track calibration now passes physical route gates in three fresh Gazebo runs each for the two original routes and a reserved route. [Calibration results and limits](docs/odometry-diagnostics.md) describe the tested simulation configuration. FIFO pickup mission planning is available as a Python API and a geometrically checked CLI. A separate mission controller executes FIFO requests with simulated service stops and depot return; [historical raw-wheel FIFO validation](docs/mission-execution-validation.md) recorded 342 passing package tests and three fresh Gazebo runs each for two missions on the recorded FIFO source. Mission execution supports startup FIFO, NN and NN+2-opt selection. Paused-mission replanning from explicit graph nodes supports manual logical closures.
+
+## Paused mission closure replanning
+
+Paused missions can resume from an explicit graph node with a complete list
+of manually supplied logical edge closures through
+`/warehouse/resume_mission_with_closures`. An empty list reopens all edges;
+the existing `/warehouse/resume_mission` retains the last accepted closures.
+Both services retain the existing rest, freshness and coordinate checks and
+replace the plan only after complete validation.
+
+`/warehouse/mission_plan_markers` shows the before/accepted plans, accepted
+closures, plan start and remaining original request IDs. These are plans,
+not measured trajectories. RViz uses Fixed Frame **`odom`**, with the installed
+`warehouse_control/rviz/mission_plans.rviz` configuration. See
+[build, service examples and acceptance conditions](docs/mission-closures.md)
+and [fresh validation evidence and limitations](docs/mission-closures-validation.md).
+No automatic obstacle detection, inserted physical obstacle, intermediate-edge
+resume or hardware safety guarantee is provided.
 
 ## Development environment
 
