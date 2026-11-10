@@ -1440,3 +1440,31 @@ Wheel slip/distance errors remain unobserved. Physical wheel separation stays
 physical acceptance limit is unchanged. See [integration checks and limitations](docs/imu-odometry-integration.md);
 the [strategy campaign above](#controller-strategy-validation--2026-10-20) records
 the repeated explicitly remapped controller checks.
+
+## Pickup ordering comparison
+
+Build and source the ROS workspace, then compare a fixed suite from outside the
+checkout. The installed world and complete graph geometry are checked first.
+
+```bash
+colcon build --packages-up-to warehouse_planning
+source install/setup.bash
+cd /tmp
+ros2 run warehouse_planning compare_ordering --suite --exact --repeat 5
+```
+
+Use `--pickups r1c2 r2c0 r2c4` instead of `--suite` for a custom case,
+and `--json` for a single machine-readable report. `--exact` enumerates
+request-index permutations for at most eight requests; omit it for larger
+inputs. The reference is the shortest depot-return ordering on the given
+graph, not a physical-travel or execution-time optimum. Repeated locations
+retain separate one-based original request IDs.
+
+Each strategy performs one warmup, then 1–100 timed complete plan builds.
+Reported medians use wall-clock `perf_counter_ns`; NN+2-opt includes its NN
+initialization. Graph/world loading, geometric checks and the exact-reference
+enumeration are outside those measurements. Values vary with machine load and
+are not robot motion time. No robot commands are sent.
+
+See [ordering comparison](docs/ordering-comparison.md) for the fixed cases,
+measured results and limitations.

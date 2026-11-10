@@ -20,5 +20,6 @@ setup(
     entry_points={'console_scripts': [
         'route_example = warehouse_planning.route_example:main',
         'mission_example = warehouse_planning.mission_example:main',
+        'compare_ordering = warehouse_planning.compare_ordering:main',
     ]},
 )
